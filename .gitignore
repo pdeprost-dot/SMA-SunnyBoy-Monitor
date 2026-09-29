@@ -1,0 +1,8 @@
+/.arduino/
+/build/
+*.bin
+*.elf
+*.map
+*.log
+.vscode/
+
