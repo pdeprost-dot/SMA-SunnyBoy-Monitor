@@ -20,6 +20,10 @@ connues par inquiry BR/EDR depuis un ESP32 classique.
 
 Une compilation seule donne `BUILD PASS — HARDWARE TEST PENDING`.
 
+Premier essai matériel le 2026-09-29 : build et flash PASS sur ESP32-D0WD,
+mais trois inquiries ont retourné zéro appareil. Phase 1 non validée ; voir
+`phase-1-result-2026-09-29.md`.
+
 ## Jalons suivants
 
 Aucun jalon suivant ne doit être commencé automatiquement. La Phase 2 sera
