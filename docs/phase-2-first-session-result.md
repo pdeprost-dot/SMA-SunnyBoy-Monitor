@@ -45,11 +45,16 @@ utilisé directement.
 
 ## Test de reconnexion
 
-Le test demandé de déconnexion puis reconnexion n'est pas validé. Après la
-séquence, l'ESP32 est devenu injoignable sur le LAN. Aucun port USB n'était
-présent pour déterminer si la cause était un reset, un watchdog, un blocage de
-la déconnexion SPP ou une perte Wi-Fi. Aucun contournement par redémarrage
-automatique n'a été ajouté.
+Le diagnostic USB a montré une fermeture propre (`ESP_SPP_CLOSE_EVT`, statut
+0), suivie d'un échec lorsque `esp_spp_connect()` était relancé immédiatement :
+initialisation client puis fermeture, sans événement d'ouverture. La même
+reconnexion réussit après trois secondes. Une garde non bloquante de trois
+secondes est donc appliquée après la fermeture SPP ; aucun redémarrage ou
+watchdog volontaire n'est utilisé. Trois cycles connect/session/Data2+ puis
+disconnect ont ensuite réussi. Les heaps après déconnexion étaient 22 384,
+21 624 et 21 632 octets : stabilisation après le premier cycle, sans dérive
+entre les cycles 2 et 3. Le minimum heap était 11 468 octets et le plus grand
+bloc est descendu ponctuellement à 852 octets ; cette marge reste critique.
 
 ## Verdict limité
 
@@ -58,7 +63,7 @@ automatique n'a été ajouté.
 - `BT CONNECTION PASS` ;
 - `SMA SESSION PASS` pour l'initialisation niveau 1/Data2+ ;
 - `SMA PROTOCOL RESPONSE PASS` pour `0x00000200` et le numéro de série ;
-- reconnect test : `FAIL — diagnostic USB requis`.
+- reconnect test : `PASS` sur trois cycles avec la garde de trois secondes.
 
 Aucun login, aucune mesure électrique, aucun multi-SMA fonctionnel et aucun
 code Phase 3 n'ont été ajoutés.

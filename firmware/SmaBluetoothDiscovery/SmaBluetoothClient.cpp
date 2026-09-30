@@ -88,13 +88,24 @@ bool SmaBluetoothClient::requestConnect() {
   resetParser();
   connectTaskDone_ = false;
   connectTaskResult_ = false;
+  connectTaskStarted_ = false;
   logMemory("before_connect");
   setState(State::CONNECTING);
+  if (static_cast<int32_t>(millis() - reconnectAllowedAt_) < 0) {
+    emit("[SMA] connect deferred guard_ms=%lu",
+         static_cast<unsigned long>(reconnectAllowedAt_ - millis()));
+    return true;
+  }
+  return startConnectTask();
+}
+
+bool SmaBluetoothClient::startConnectTask() {
   if (xTaskCreatePinnedToCore(connectTaskEntry, "sma-connect", 4096, this, 1, &connectTaskHandle_, 0) != pdPASS) {
     connectTaskHandle_ = nullptr;
     fail("connect_task_create_failed");
     return false;
   }
+  connectTaskStarted_ = true;
   return true;
 }
 
@@ -115,6 +126,7 @@ bool SmaBluetoothClient::requestDisconnect() {
   if (state_ == State::DISCONNECTED || state_ == State::CONNECTING) return false;
   setState(State::DISCONNECTING);
   const bool result = transport_.disconnect();
+  reconnectAllowedAt_ = millis() + RECONNECT_GUARD_MS;
   resetParser();
   setState(State::DISCONNECTED);
   logMemory("after_disconnect");
@@ -122,8 +134,13 @@ bool SmaBluetoothClient::requestDisconnect() {
 }
 
 void SmaBluetoothClient::tick() {
+  if (state_ == State::CONNECTING && !connectTaskStarted_ && !connectTaskDone_ &&
+      static_cast<int32_t>(millis() - reconnectAllowedAt_) >= 0) {
+    if (!startConnectTask()) return;
+  }
   if (state_ == State::CONNECTING && connectTaskDone_) {
     connectTaskDone_ = false;
+    connectTaskStarted_ = false;
     if (!connectTaskResult_) {
       fail("bt_connect_failed");
       return;

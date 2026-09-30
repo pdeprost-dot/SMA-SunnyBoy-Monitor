@@ -41,12 +41,14 @@ class SmaBluetoothClient {
  private:
   static constexpr size_t FRAME_CAPACITY = 384;
   static constexpr uint32_t STEP_TIMEOUT_MS = 15000;
+  static constexpr uint32_t RECONNECT_GUARD_MS = 3000;
 
   BluetoothSerial& transport_;
   LogFn logger_;
   State state_ = State::DISCONNECTED;
   volatile bool connectTaskDone_ = false;
   volatile bool connectTaskResult_ = false;
+  bool connectTaskStarted_ = false;
   TaskHandle_t connectTaskHandle_ = nullptr;
   uint8_t targetConnectAddress_[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
   uint8_t targetProtocolAddress_[6] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x02};
@@ -60,6 +62,7 @@ class SmaBluetoothClient {
   uint8_t netId_ = 0;
   uint32_t decodedSerial_ = 0;
   uint32_t deadlineAt_ = 0;
+  uint32_t reconnectAllowedAt_ = 0;
   uint32_t txBytes_ = 0;
   uint32_t rxBytes_ = 0;
   uint32_t validResponses_ = 0;
@@ -67,6 +70,7 @@ class SmaBluetoothClient {
   char lastError_[64] = {};
 
   static void connectTaskEntry(void* context);
+  bool startConnectTask();
   void runConnectTask();
   void setState(State next);
   void fail(const char* error);
