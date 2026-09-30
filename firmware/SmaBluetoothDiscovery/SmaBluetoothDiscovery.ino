@@ -7,6 +7,8 @@
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 
+#include "SmaBluetoothClient.h"
+
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error "Bluetooth is not enabled for this target"
 #endif
@@ -81,6 +83,9 @@ String apPassword;
 String otaPassword;
 
 void addLog(const char* format, ...);
+void smaLogAdapter(const char* line);
+
+SmaBluetoothClient smaClient(serialBt, smaLogAdapter);
 
 const char* scanStateName(ScanState value) {
   switch (value) {
@@ -109,6 +114,10 @@ void addLog(const char* format, ...) {
   logNext = (logNext + 1) % LOG_LINES;
   if (logCount < LOG_LINES) ++logCount;
   portEXIT_CRITICAL(&logMux);
+}
+
+void smaLogAdapter(const char* line) {
+  addLog("%s", line);
 }
 
 String jsonEscape(const char* value) {
@@ -195,7 +204,8 @@ void stopInquiryWindow(const char* stage) {
 }
 
 bool startBtScan() {
-  if (!bluetoothReady || otaBusy || scanState == ScanState::SCANNING) return false;
+  if (!bluetoothReady || otaBusy || scanState == ScanState::SCANNING ||
+      smaClient.state() != SmaBluetoothClient::State::DISCONNECTED) return false;
   portENTER_CRITICAL(&resultsMux);
   memset(btResults, 0, sizeof(btResults));
   btResultCount = 0;
@@ -303,6 +313,30 @@ String statusJson() {
   return json;
 }
 
+String smaStatusJson() {
+  String json;
+  json.reserve(512);
+  json += F("{\"target\":\""); json += SmaBluetoothClient::TARGET_MAC;
+  json += F("\",\"expectedSerial\":"); json += SmaBluetoothClient::TARGET_SERIAL;
+  json += F(",\"bluetoothConnected\":"); json += smaClient.bluetoothConnected() ? F("true") : F("false");
+  json += F(",\"state\":\""); json += smaClient.stateName(); json += '"';
+  json += F(",\"sessionReady\":"); json += smaClient.sessionReady() ? F("true") : F("false");
+  json += F(",\"decodedSerial\":"); if (smaClient.decodedSerial()) json += smaClient.decodedSerial(); else json += F("null");
+  json += F(",\"netId\":"); json += smaClient.netId();
+  json += F(",\"lastError\":\""); json += jsonEscape(smaClient.lastError()); json += '"';
+  json += F(",\"txBytes\":"); json += smaClient.txBytes();
+  json += F(",\"rxBytes\":"); json += smaClient.rxBytes();
+  json += F(",\"validResponses\":"); json += smaClient.validResponses();
+  json += F(",\"lastValidResponseAgeMs\":");
+  if (smaClient.lastValidResponseAt()) json += millis() - smaClient.lastValidResponseAt(); else json += F("null");
+  json += F(",\"heap\":{\"free\":"); json += ESP.getFreeHeap();
+  json += F(",\"minimum\":"); json += ESP.getMinFreeHeap();
+  json += F(",\"largestInternal\":");
+  json += heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  json += F("}}");
+  return json;
+}
+
 String logJson() {
   String json(F("{\"lines\":["));
   size_t count;
@@ -345,6 +379,18 @@ void registerRoutes() {
   server.on("/api/status", HTTP_GET, [] { noteHttpRequest("status"); sendJson(statusJson()); });
   server.on("/api/bt/results", HTTP_GET, [] { noteHttpRequest("results"); sendJson(resultsJson()); });
   server.on("/api/log", HTTP_GET, [] { noteHttpRequest("log"); sendJson(logJson()); });
+  server.on("/api/sma/status", HTTP_GET, [] { noteHttpRequest("sma_status"); sendJson(smaStatusJson()); });
+  server.on("/api/sma/connect", HTTP_POST, [] {
+    noteHttpRequest("sma_connect");
+    if (scanState == ScanState::SCANNING) { sendJson("{\"error\":\"bt_scan_in_progress\"}", 409); return; }
+    if (!smaClient.requestConnect()) { sendJson("{\"error\":\"sma_not_disconnected\"}", 409); return; }
+    sendJson("{\"accepted\":true,\"state\":\"CONNECTING\"}", 202);
+  });
+  server.on("/api/sma/disconnect", HTTP_POST, [] {
+    noteHttpRequest("sma_disconnect");
+    if (!smaClient.requestDisconnect()) { sendJson("{\"error\":\"disconnect_not_available\"}", 409); return; }
+    sendJson("{\"disconnected\":true}");
+  });
   server.on("/api/bt/scan", HTTP_POST, [] {
     noteHttpRequest("scan");
     if (scanState == ScanState::SCANNING) { sendJson("{\"error\":\"scan_already_running\"}", 409); return; }
@@ -470,6 +516,7 @@ void setup() {
   registerRoutes(); server.begin(); addLog("[WEB] ready port=80");
   configureOta();
   bluetoothReady = serialBt.begin("SMA-SunnyBoy-Monitor", true);
+  if (bluetoothReady) serialBt.setPin("0000", 4);
   addLog("[BT] %s mode=master inquiry=classic", bluetoothReady ? "ready" : "initialization_failed");
   addLog("[HEAP] services_ready free=%u min=%u largest=%u", ESP.getFreeHeap(), ESP.getMinFreeHeap(),
          heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
@@ -481,6 +528,7 @@ void loop() {
   if (lastLoopAt != 0 && loopGap > maxLoopGapMs) maxLoopGapMs = loopGap;
   lastLoopAt = now;
   server.handleClient();
+  smaClient.tick();
   serviceBtScan();
   if (scanState != ScanState::SCANNING) ArduinoOTA.handle();
   const wl_status_t wifiStatus = WiFi.status();
