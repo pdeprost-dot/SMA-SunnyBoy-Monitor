@@ -9,9 +9,9 @@ sur le matériel.
 
 ## Périmètre actuel
 
-Phase 1 uniquement : inquiry Bluetooth Classic et détection des trois adresses
-connues. Un socle Wi-Fi/Web/OTA local permet d'exécuter ce diagnostic à
-distance lorsque le prototype est placé près des onduleurs.
+Phase 1 clôturée : les trois adresses connues ont été détectées réellement par
+inquiry Bluetooth Classic avec Wi-Fi et Web actifs. Un socle Wi-Fi/Web/OTA
+local permet d'exécuter ce diagnostic à distance.
 
 | Onduleur | Adresse Bluetooth | Numéro de série attendu |
 |---|---|---:|
@@ -58,5 +58,6 @@ arduino-cli upload --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs -p COMx f
 - [État du projet](docs/PROJECT_STATE.md)
 - [Audit SMA de Phase 0](docs/phase-0-audit.md)
 - [Protocole de test Phase 1](docs/phase-1-test.md)
+- [Résultat matériel final Phase 1](docs/phase-1-result-final.md)
 - [Développement distant](docs/remote-development.md)
 
