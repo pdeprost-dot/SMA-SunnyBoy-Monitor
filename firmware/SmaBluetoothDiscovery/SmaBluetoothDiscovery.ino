@@ -17,7 +17,9 @@
 namespace {
 constexpr uint32_t SERIAL_BAUD = 115200;
 constexpr uint32_t INQUIRY_DURATION_MS = 12000;
-constexpr uint32_t SCAN_FINISH_GRACE_MS = 1000;
+constexpr uint32_t INQUIRY_WINDOW_MS = 1280;
+constexpr uint32_t INQUIRY_WINDOW_GRACE_MS = 150;
+constexpr uint32_t WIFI_RECOVERY_WINDOW_MS = 1000;
 constexpr uint32_t STA_CONNECT_TIMEOUT_MS = 18000;
 constexpr uint32_t STA_RETRY_INTERVAL_MS = 60000;
 constexpr size_t MAX_BT_RESULTS = 16;
@@ -58,16 +60,27 @@ size_t logCount = 0;
 ScanState scanState = ScanState::IDLE;
 uint32_t scanStartedAt = 0;
 uint32_t scanCompletedAt = 0;
+uint32_t inquiryWindowStartedAt = 0;
+uint32_t nextInquiryWindowAt = 0;
+uint32_t inquiryWindowCount = 0;
 uint32_t scanNumber = 0;
 uint32_t nextStaAttemptAt = 0;
 uint32_t bootAt = 0;
+uint32_t lastLoopAt = 0;
+uint32_t maxLoopGapMs = 0;
+uint32_t httpDuringScanCount = 0;
+uint32_t callbackCount = 0;
+wl_status_t lastWifiStatus = WL_NO_SHIELD;
 bool bluetoothReady = false;
+bool inquiryWindowActive = false;
 bool otaBusy = false;
 bool apActive = false;
 String hostname;
 String apSsid;
 String apPassword;
 String otaPassword;
+
+void addLog(const char* format, ...);
 
 const char* scanStateName(ScanState value) {
   switch (value) {
@@ -77,6 +90,11 @@ const char* scanStateName(ScanState value) {
     case ScanState::ERROR: return "ERROR";
   }
   return "ERROR";
+}
+
+void logMemory(const char* stage) {
+  addLog("[MEM] %s free=%u min=%u largest=%u", stage, ESP.getFreeHeap(), ESP.getMinFreeHeap(),
+         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 
 void addLog(const char* format, ...) {
@@ -117,6 +135,7 @@ int8_t knownSmaIndex(const char* mac) {
 
 void onBtDevice(BTAdvertisedDevice* device) {
   if (device == nullptr) return;
+  ++callbackCount;
   BtResult incoming;
   const String address = device->getAddress().toString();
   strlcpy(incoming.mac, address.c_str(), sizeof(incoming.mac));
@@ -151,21 +170,51 @@ void onBtDevice(BTAdvertisedDevice* device) {
   }
 }
 
+bool startInquiryWindow() {
+  serialBt.discoverClear();
+  inquiryWindowStartedAt = millis();
+  ++inquiryWindowCount;
+  inquiryWindowActive = serialBt.discoverAsync(onBtDevice, INQUIRY_WINDOW_MS);
+  addLog("[SCAN] WINDOW_START cycle=%lu window=%lu ok=%s free=%u largest=%u",
+         static_cast<unsigned long>(scanNumber), static_cast<unsigned long>(inquiryWindowCount),
+         inquiryWindowActive ? "true" : "false", ESP.getFreeHeap(),
+         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  return inquiryWindowActive;
+}
+
+void stopInquiryWindow(const char* stage) {
+  if (!inquiryWindowActive) return;
+  serialBt.discoverAsyncStop();
+  inquiryWindowActive = false;
+  logMemory(stage);
+  // BluetoothSerial retains every result in a dynamically allocated std::map.
+  // The fixed-size snapshot above is authoritative; free the library copy.
+  serialBt.discoverClear();
+  logMemory("window_after_library_clear");
+  nextInquiryWindowAt = millis() + WIFI_RECOVERY_WINDOW_MS;
+}
+
 bool startBtScan() {
   if (!bluetoothReady || otaBusy || scanState == ScanState::SCANNING) return false;
-  serialBt.discoverClear();
   portENTER_CRITICAL(&resultsMux);
   memset(btResults, 0, sizeof(btResults));
   btResultCount = 0;
   btOverflow = false;
   portEXIT_CRITICAL(&resultsMux);
   ++scanNumber;
+  callbackCount = 0;
+  httpDuringScanCount = 0;
+  maxLoopGapMs = 0;
+  inquiryWindowCount = 0;
+  inquiryWindowActive = false;
   scanStartedAt = millis();
   scanCompletedAt = 0;
   scanState = ScanState::SCANNING;
-  addLog("[SCAN] START cycle=%lu duration_ms=%lu", static_cast<unsigned long>(scanNumber),
-         static_cast<unsigned long>(INQUIRY_DURATION_MS));
-  if (!serialBt.discoverAsync(onBtDevice, INQUIRY_DURATION_MS)) {
+  logMemory("scan_before_start");
+  addLog("[SCAN] START cycle=%lu elapsed_ms=%lu window_ms=%lu wifi_gap_ms=%lu",
+         static_cast<unsigned long>(scanNumber), static_cast<unsigned long>(INQUIRY_DURATION_MS),
+         static_cast<unsigned long>(INQUIRY_WINDOW_MS), static_cast<unsigned long>(WIFI_RECOVERY_WINDOW_MS));
+  if (!startInquiryWindow()) {
     scanState = ScanState::ERROR;
     addLog("[SCAN] ERROR inquiry_start_failed");
     return false;
@@ -174,15 +223,29 @@ bool startBtScan() {
 }
 
 void serviceBtScan() {
-  if (scanState != ScanState::SCANNING ||
-      millis() - scanStartedAt < INQUIRY_DURATION_MS + SCAN_FINISH_GRACE_MS) return;
-  serialBt.discoverAsyncStop();
+  if (scanState != ScanState::SCANNING) return;
+  const uint32_t now = millis();
+  if (inquiryWindowActive && now - inquiryWindowStartedAt >= INQUIRY_WINDOW_MS + INQUIRY_WINDOW_GRACE_MS) {
+    stopInquiryWindow("window_after_stop");
+  }
+  if (now - scanStartedAt < INQUIRY_DURATION_MS) {
+    if (!inquiryWindowActive && static_cast<int32_t>(now - nextInquiryWindowAt) >= 0 && !startInquiryWindow()) {
+      scanState = ScanState::ERROR;
+      addLog("[SCAN] ERROR window_start_failed");
+    }
+    return;
+  }
+  stopInquiryWindow("scan_final_stop");
   scanState = ScanState::COMPLETE;
   scanCompletedAt = millis();
-  addLog("[SCAN] COMPLETE cycle=%lu devices=%u overflow=%s heap=%u min=%u largest=%u",
-         static_cast<unsigned long>(scanNumber), static_cast<unsigned>(btResultCount),
-         btOverflow ? "true" : "false", ESP.getFreeHeap(), ESP.getMinFreeHeap(),
-         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  addLog("[SCAN] COMPLETE cycle=%lu windows=%lu devices=%u callbacks=%lu overflow=%s",
+         static_cast<unsigned long>(scanNumber), static_cast<unsigned long>(inquiryWindowCount),
+         static_cast<unsigned>(btResultCount),
+         static_cast<unsigned long>(callbackCount), btOverflow ? "true" : "false");
+  addLog("[SCAN] HEALTH http_during=%lu wifi=%d loop_gap_max=%lu",
+         static_cast<unsigned long>(httpDuringScanCount), static_cast<int>(WiFi.status()),
+         static_cast<unsigned long>(maxLoopGapMs));
+  logMemory("scan_complete");
 }
 
 String resultsJson() {
@@ -272,12 +335,18 @@ setInterval(refresh,2000);refresh();
 
 void sendJson(const String& value, int status = 200) { server.send(status, "application/json", value); }
 
+void noteHttpRequest(const char* route) {
+  (void)route;
+  if (scanState == ScanState::SCANNING) ++httpDuringScanCount;
+}
+
 void registerRoutes() {
-  server.on("/", HTTP_GET, [] { server.send_P(200, "text/html; charset=utf-8", PAGE); });
-  server.on("/api/status", HTTP_GET, [] { sendJson(statusJson()); });
-  server.on("/api/bt/results", HTTP_GET, [] { sendJson(resultsJson()); });
-  server.on("/api/log", HTTP_GET, [] { sendJson(logJson()); });
+  server.on("/", HTTP_GET, [] { noteHttpRequest("/"); server.send_P(200, "text/html; charset=utf-8", PAGE); });
+  server.on("/api/status", HTTP_GET, [] { noteHttpRequest("status"); sendJson(statusJson()); });
+  server.on("/api/bt/results", HTTP_GET, [] { noteHttpRequest("results"); sendJson(resultsJson()); });
+  server.on("/api/log", HTTP_GET, [] { noteHttpRequest("log"); sendJson(logJson()); });
   server.on("/api/bt/scan", HTTP_POST, [] {
+    noteHttpRequest("scan");
     if (scanState == ScanState::SCANNING) { sendJson("{\"error\":\"scan_already_running\"}", 409); return; }
     if (otaBusy) { sendJson("{\"error\":\"ota_in_progress\"}", 409); return; }
     if (!startBtScan()) { sendJson("{\"error\":\"scan_start_failed\"}", 500); return; }
@@ -407,9 +476,19 @@ void setup() {
 }
 
 void loop() {
+  const uint32_t now = millis();
+  const uint32_t loopGap = now - lastLoopAt;
+  if (lastLoopAt != 0 && loopGap > maxLoopGapMs) maxLoopGapMs = loopGap;
+  lastLoopAt = now;
   server.handleClient();
   serviceBtScan();
   if (scanState != ScanState::SCANNING) ArduinoOTA.handle();
+  const wl_status_t wifiStatus = WiFi.status();
+  if (wifiStatus != lastWifiStatus) {
+    addLog("[WIFI] status_change old=%d new=%d scan=%s", static_cast<int>(lastWifiStatus),
+           static_cast<int>(wifiStatus), scanStateName(scanState));
+    lastWifiStatus = wifiStatus;
+  }
   if (WiFi.status() != WL_CONNECTED && static_cast<int32_t>(millis() - nextStaAttemptAt) >= 0) connectSta();
   delay(2);
 }
