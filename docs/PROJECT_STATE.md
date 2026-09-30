@@ -24,6 +24,11 @@ Premier essai matériel le 2026-09-29 : build et flash PASS sur ESP32-D0WD,
 mais trois inquiries ont retourné zéro appareil. Phase 1 non validée ; voir
 `phase-1-result-2026-09-29.md`.
 
+Socle distant ajouté le 2026-09-30 : provisioning AP, reconnexion STA,
+Web/API, journal borné et OTA LAN. Build et flash USB validés. Le démarrage
+des services est validé par le log série, mais leur accès réseau et l'OTA
+réelle restent à tester. La Phase 1 demeure inchangée et non validée.
+
 ## Jalons suivants
 
 Aucun jalon suivant ne doit être commencé automatiquement. La Phase 2 sera

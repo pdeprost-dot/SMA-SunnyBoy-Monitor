@@ -10,7 +10,8 @@ sur le matériel.
 ## Périmètre actuel
 
 Phase 1 uniquement : inquiry Bluetooth Classic et détection des trois adresses
-connues.
+connues. Un socle Wi-Fi/Web/OTA local permet d'exécuter ce diagnostic à
+distance lorsque le prototype est placé près des onduleurs.
 
 | Onduleur | Adresse Bluetooth | Numéro de série attendu |
 |---|---|---:|
@@ -19,8 +20,9 @@ connues.
 | SMA #3 | `02:00:00:00:00:03` | 1000000003 |
 
 La Phase 1 n'établit aucune connexion avec les onduleurs et n'implémente ni
-login SMA, ni Data2+, ni mesure, ni Wi-Fi, MQTT, Web, écran ou ProgHard Link.
-PZEM et RS485 sont hors périmètre.
+login SMA, ni Data2+, ni mesure, ni MQTT, écran ou ProgHard Link. PZEM et
+RS485 sont hors périmètre. Wi-Fi, Web et OTA sont uniquement des outils de
+développement local.
 
 ## Matériel et environnement
 
@@ -35,7 +37,7 @@ Les ESP32-C3, C6, S2 et S3 ne conviennent pas à ce POC Bluetooth Classic.
 ## Compiler
 
 ```powershell
-arduino-cli compile --fqbn esp32:esp32:esp32 firmware/SmaBluetoothDiscovery
+arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs firmware/SmaBluetoothDiscovery
 ```
 
 Ne pas réutiliser un ancien port COM. Vérifier la carte présente avec :
@@ -48,7 +50,7 @@ La commande de téléversement ne doit être lancée qu'après identification de
 la carte et du port :
 
 ```powershell
-arduino-cli upload --fqbn esp32:esp32:esp32 -p COMx firmware/SmaBluetoothDiscovery
+arduino-cli upload --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs -p COMx firmware/SmaBluetoothDiscovery
 ```
 
 ## Documentation
@@ -56,4 +58,5 @@ arduino-cli upload --fqbn esp32:esp32:esp32 -p COMx firmware/SmaBluetoothDiscove
 - [État du projet](docs/PROJECT_STATE.md)
 - [Audit SMA de Phase 0](docs/phase-0-audit.md)
 - [Protocole de test Phase 1](docs/phase-1-test.md)
+- [Développement distant](docs/remote-development.md)
 
