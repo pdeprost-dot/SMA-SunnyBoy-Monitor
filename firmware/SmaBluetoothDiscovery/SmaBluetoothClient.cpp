@@ -103,7 +103,9 @@ void SmaBluetoothClient::connectTaskEntry(void* context) {
 }
 
 void SmaBluetoothClient::runConnectTask() {
-  connectTaskResult_ = transport_.connect(targetConnectAddress_);
+  // The SB2500HF-30 exposed RFCOMM channel 1 during the first measured SDP.
+  // Connecting directly avoids the legacy inverter's intermittent SDP failure.
+  connectTaskResult_ = transport_.connect(targetConnectAddress_, 1);
   connectTaskDone_ = true;
   connectTaskHandle_ = nullptr;
   vTaskDelete(nullptr);
@@ -189,6 +191,14 @@ bool SmaBluetoothClient::validTargetSource() const {
 void SmaBluetoothClient::processFrame() {
   const uint16_t command = read16(rxFrame_ + 16);
   emit("[SMA] RX len=%u cmd=0x%04X state=%s", static_cast<unsigned>(rxPosition_), command, stateName());
+  char hexLine[128];
+  const size_t shown = min(rxPosition_, static_cast<size_t>(48));
+  size_t used = snprintf(hexLine, sizeof(hexLine), "[SMA] frame RX ");
+  for (size_t index = 0; index < shown && used + 4 < sizeof(hexLine); ++index) {
+    used += snprintf(hexLine + used, sizeof(hexLine) - used, "%02X", rxFrame_[index]);
+  }
+  if (shown < rxPosition_ && used + 4 < sizeof(hexLine)) snprintf(hexLine + used, sizeof(hexLine) - used, "...");
+  if (logger_) logger_(hexLine);
   if ((rxFrame_[0] ^ rxFrame_[1] ^ rxFrame_[2]) != rxFrame_[3]) {
     fail("invalid_l1_checksum");
     return;
@@ -209,8 +219,9 @@ void SmaBluetoothClient::processFrame() {
   }
 
   if (state_ == State::WAIT_LOCAL_ADDRESS && command == 0x0005) {
-    if (rxPosition_ < 32) { fail("local_address_frame_too_short"); return; }
-    memcpy(localProtocolAddress_, rxFrame_ + 26, 6);
+    uint8_t localAddress[6] = {};
+    transport_.getBtAddress(localAddress);
+    for (size_t index = 0; index < 6; ++index) localProtocolAddress_[index] = localAddress[5 - index];
     emit("[SMA] local_bt=%02X:%02X:%02X:%02X:%02X:%02X",
          localProtocolAddress_[5], localProtocolAddress_[4], localProtocolAddress_[3],
          localProtocolAddress_[2], localProtocolAddress_[1], localProtocolAddress_[0]);

@@ -84,6 +84,7 @@ String otaPassword;
 
 void addLog(const char* format, ...);
 void smaLogAdapter(const char* line);
+void onSppEvent(esp_spp_cb_event_t event, esp_spp_cb_param_t* parameter);
 
 SmaBluetoothClient smaClient(serialBt, smaLogAdapter);
 
@@ -118,6 +119,31 @@ void addLog(const char* format, ...) {
 
 void smaLogAdapter(const char* line) {
   addLog("%s", line);
+}
+
+void onSppEvent(esp_spp_cb_event_t event, esp_spp_cb_param_t* parameter) {
+  if (parameter == nullptr) return;
+  switch (event) {
+    case ESP_SPP_DISCOVERY_COMP_EVT:
+      addLog("[SPP] discovery status=%d channels=%u first=%u", parameter->disc_comp.status,
+             parameter->disc_comp.scn_num,
+             parameter->disc_comp.scn_num ? parameter->disc_comp.scn[0] : 0);
+      break;
+    case ESP_SPP_OPEN_EVT:
+      addLog("[SPP] open status=%d handle=%lu", parameter->open.status,
+             static_cast<unsigned long>(parameter->open.handle));
+      break;
+    case ESP_SPP_CLOSE_EVT:
+      addLog("[SPP] close status=%d handle=%lu", parameter->close.status,
+             static_cast<unsigned long>(parameter->close.handle));
+      break;
+    case ESP_SPP_CL_INIT_EVT:
+      addLog("[SPP] client_init status=%d handle=%lu", parameter->cl_init.status,
+             static_cast<unsigned long>(parameter->cl_init.handle));
+      break;
+    default:
+      break;
+  }
 }
 
 String jsonEscape(const char* value) {
@@ -516,7 +542,10 @@ void setup() {
   registerRoutes(); server.begin(); addLog("[WEB] ready port=80");
   configureOta();
   bluetoothReady = serialBt.begin("SMA-SunnyBoy-Monitor", true);
-  if (bluetoothReady) serialBt.setPin("0000", 4);
+  if (bluetoothReady) {
+    serialBt.setPin("0000", 4);
+    serialBt.register_callback(onSppEvent);
+  }
   addLog("[BT] %s mode=master inquiry=classic", bluetoothReady ? "ready" : "initialization_failed");
   addLog("[HEAP] services_ready free=%u min=%u largest=%u", ESP.getFreeHeap(), ESP.getMinFreeHeap(),
          heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));

@@ -10,13 +10,16 @@ réponse Data2+ valide et décodée.
 ## Séquence minimale retenue
 
 1. connexion Bluetooth Classic SPP directe à la MAC connue, PIN Bluetooth
-   fixe `0000` ;
+   fixe `0000`, canal RFCOMM `1` mesuré sur le SB2500HF-30 ; cette connexion
+   directe évite son interrogation SDP intermittente ;
 2. réception de l'annonce SMA niveau 1, commande `0x0002`, et extraction du
    NetID ;
 3. réponse niveau 1 `0x0002` contenant `0x00700400`, le NetID et les champs
    d'initialisation ;
-4. attente des messages intermédiaires puis de la commande niveau 1 `0x0005`,
-   qui fournit l'adresse Bluetooth locale dans la représentation SMA ;
+4. attente des messages intermédiaires puis de la commande niveau 1 `0x0005` ;
+   l'adresse Bluetooth locale est obtenue auprès de la pile ESP32 puis inversée
+   pour la représentation SMA (le SB2500HF-30 envoie une trame `0x0005` de
+   26 octets, trop courte pour l'offset 26 utilisé par certaines références) ;
 5. émission d'une requête Data2+ `0x00000200` dans une enveloppe niveau 1
    `0x0001` ;
 6. validation de la longueur et du XOR niveau 1, déséchappement Data2+,

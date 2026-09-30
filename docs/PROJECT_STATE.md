@@ -37,3 +37,10 @@ Le minimum heap de 11 796 octets et un plus grand bloc ponctuellement réduit à
 Aucun jalon suivant ne doit être commencé automatiquement. La Phase 2 portera
 sur une seule connexion SMA et devra commencer par un budget mémoire strict.
 
+## Phase 2 expérimentale
+
+La première transaction Data2+ réelle avec SMA #1 est validée sur la branche
+`feature/sma-first-session-v1` : FCS valide et numéro de série `1000000001`
+décodé. Le test de reconnexion a toutefois rendu l'ESP32 injoignable et reste à
+diagnostiquer sur USB. Voir `phase-2-first-session-result.md`.
+
