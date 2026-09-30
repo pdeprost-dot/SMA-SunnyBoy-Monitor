@@ -8,6 +8,7 @@
 #include <esp_system.h>
 
 #include "SmaBluetoothClient.h"
+#include "SmaLocalConfig.h"
 
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error "Bluetooth is not enabled for this target"
@@ -30,7 +31,6 @@ constexpr size_t LOG_LINES = 24;
 constexpr size_t LOG_LINE_LENGTH = 128;
 
 enum class ScanState : uint8_t { IDLE, SCANNING, COMPLETE, ERROR };
-struct KnownSma { const char* mac; const char* label; uint32_t serial; };
 struct BtResult {
   char mac[18]{};
   char name[MAX_BT_NAME + 1]{};
@@ -40,12 +40,6 @@ struct BtResult {
   bool haveRssi = false;
   bool haveCod = false;
   int8_t knownIndex = -1;
-};
-
-const KnownSma KNOWN_SMAS[] = {
-  {"02:00:00:00:00:01", "SMA #1", 1000000001UL},
-  {"02:00:00:00:00:02", "SMA #2", 1000000002UL},
-  {"02:00:00:00:00:03", "SMA #3", 1000000003UL},
 };
 
 BluetoothSerial serialBt;
@@ -162,8 +156,8 @@ String jsonEscape(const char* value) {
 }
 
 int8_t knownSmaIndex(const char* mac) {
-  for (size_t index = 0; index < std::size(KNOWN_SMAS); ++index) {
-    if (strcasecmp(mac, KNOWN_SMAS[index].mac) == 0) return static_cast<int8_t>(index);
+  for (size_t index = 0; index < std::size(SmaLocalConfig::KNOWN_SMAS); ++index) {
+    if (strcasecmp(mac, SmaLocalConfig::KNOWN_SMAS[index].mac) == 0) return static_cast<int8_t>(index);
   }
   return -1;
 }
@@ -200,7 +194,7 @@ void onBtDevice(BTAdvertisedDevice* device) {
          incoming.haveCod ? "" : "n/a ", static_cast<unsigned long>(incoming.cod),
          incoming.knownIndex >= 0 ? " MATCH" : "");
   if (incoming.knownIndex >= 0) {
-    const KnownSma& sma = KNOWN_SMAS[incoming.knownIndex];
+    const SmaLocalConfig::Device& sma = SmaLocalConfig::KNOWN_SMAS[incoming.knownIndex];
     addLog("[BT] MATCH %s SN=%lu", sma.label, static_cast<unsigned long>(sma.serial));
   }
 }
@@ -310,7 +304,7 @@ String resultsJson() {
     json += F(",\"cod\":"); if (item.haveCod) json += item.cod; else json += F("null");
     json += F(",\"sma\":");
     if (item.knownIndex >= 0) {
-      const KnownSma& sma = KNOWN_SMAS[item.knownIndex];
+      const SmaLocalConfig::Device& sma = SmaLocalConfig::KNOWN_SMAS[item.knownIndex];
       json += F("{\"label\":\""); json += sma.label; json += F("\",\"serial\":"); json += sma.serial; json += '}';
     } else json += F("null");
     json += '}';
@@ -342,8 +336,8 @@ String statusJson() {
 String smaStatusJson() {
   String json;
   json.reserve(512);
-  json += F("{\"target\":\""); json += SmaBluetoothClient::TARGET_MAC;
-  json += F("\",\"expectedSerial\":"); json += SmaBluetoothClient::TARGET_SERIAL;
+  json += F("{\"target\":\""); json += SmaLocalConfig::TARGET_MAC;
+  json += F("\",\"expectedSerial\":"); json += SmaLocalConfig::TARGET_SERIAL;
   json += F(",\"bluetoothConnected\":"); json += smaClient.bluetoothConnected() ? F("true") : F("false");
   json += F(",\"state\":\""); json += smaClient.stateName(); json += '"';
   json += F(",\"sessionReady\":"); json += smaClient.sessionReady() ? F("true") : F("false");

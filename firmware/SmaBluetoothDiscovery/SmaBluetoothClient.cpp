@@ -13,7 +13,10 @@ constexpr uint8_t BROADCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 }
 
 SmaBluetoothClient::SmaBluetoothClient(BluetoothSerial& transport, LogFn logger)
-    : transport_(transport), logger_(logger) {}
+    : transport_(transport), logger_(logger) {
+  memcpy(targetConnectAddress_, SmaLocalConfig::TARGET_CONNECT_ADDRESS, sizeof(targetConnectAddress_));
+  memcpy(targetProtocolAddress_, SmaLocalConfig::TARGET_PROTOCOL_ADDRESS, sizeof(targetProtocolAddress_));
+}
 
 const char* SmaBluetoothClient::stateName() const {
   switch (state_) {
@@ -145,7 +148,7 @@ void SmaBluetoothClient::tick() {
       fail("bt_connect_failed");
       return;
     }
-    emit("[SMA] connect target=%s result=connected", TARGET_MAC);
+    emit("[SMA] connect target=%s result=connected", SmaLocalConfig::TARGET_MAC);
     logMemory("after_bt_connect");
     deadlineAt_ = millis() + STEP_TIMEOUT_MS;
     setState(State::WAIT_ANNOUNCE);
@@ -380,9 +383,9 @@ bool SmaBluetoothClient::decodeIdentity(const uint8_t* l2, size_t length) {
   const uint16_t receivedPacketId = read16(l2 + 27) & 0x7FFF;
   if (receivedPacketId != packetId_) { fail("identity_packet_id_mismatch"); return false; }
   decodedSerial_ = read32(l2 + 57);
-  if (decodedSerial_ != TARGET_SERIAL) {
+  if (decodedSerial_ != SmaLocalConfig::TARGET_SERIAL) {
     emit("[SMA] identity serial=%lu expected=%lu", static_cast<unsigned long>(decodedSerial_),
-         static_cast<unsigned long>(TARGET_SERIAL));
+         static_cast<unsigned long>(SmaLocalConfig::TARGET_SERIAL));
     fail("identity_serial_mismatch");
     return false;
   }

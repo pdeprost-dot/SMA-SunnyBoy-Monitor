@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <BluetoothSerial.h>
+#include "SmaLocalConfig.h"
 
 class SmaBluetoothClient {
  public:
@@ -35,9 +36,6 @@ class SmaBluetoothClient {
   uint32_t decodedSerial() const { return decodedSerial_; }
   uint8_t netId() const { return netId_; }
 
-  static constexpr const char* TARGET_MAC = "02:00:00:00:00:01";
-  static constexpr uint32_t TARGET_SERIAL = 1000000001UL;
-
  private:
   static constexpr size_t FRAME_CAPACITY = 384;
   static constexpr uint32_t STEP_TIMEOUT_MS = 15000;
@@ -50,8 +48,8 @@ class SmaBluetoothClient {
   volatile bool connectTaskResult_ = false;
   bool connectTaskStarted_ = false;
   TaskHandle_t connectTaskHandle_ = nullptr;
-  uint8_t targetConnectAddress_[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
-  uint8_t targetProtocolAddress_[6] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x02};
+  uint8_t targetConnectAddress_[6] = {};
+  uint8_t targetProtocolAddress_[6] = {};
   uint8_t localProtocolAddress_[6] = {};
   uint8_t rxFrame_[FRAME_CAPACITY] = {};
   uint8_t l2Frame_[FRAME_CAPACITY] = {};

@@ -15,9 +15,13 @@ local permet d'exécuter ce diagnostic à distance.
 
 | Onduleur | Adresse Bluetooth | Numéro de série attendu |
 |---|---|---:|
-| SMA #1 | `02:00:00:00:00:01` | 1000000001 |
-| SMA #2 | `02:00:00:00:00:02` | 1000000002 |
-| SMA #3 | `02:00:00:00:00:03` | 1000000003 |
+| SMA #1 | configuration locale | configuration locale |
+| SMA #2 | configuration locale | configuration locale |
+| SMA #3 | configuration locale | configuration locale |
+
+Copier `firmware/SmaBluetoothDiscovery/SmaLocalConfig.example.h` vers
+`SmaLocalConfig.h`, puis renseigner les identifiants locaux. Le fichier local
+est ignoré par Git.
 
 La Phase 1 n'établit aucune connexion avec les onduleurs et n'implémente ni
 login SMA, ni Data2+, ni mesure, ni MQTT, écran ou ProgHard Link. PZEM et
