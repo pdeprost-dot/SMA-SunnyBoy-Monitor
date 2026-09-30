@@ -67,3 +67,18 @@ bloc est descendu ponctuellement à 852 octets ; cette marge reste critique.
 
 Aucun login, aucune mesure électrique, aucun multi-SMA fonctionnel et aucun
 code Phase 3 n'ont été ajoutés.
+
+## Validation de sortie USB/OTA
+
+Le binaire corrigé a été transféré réellement par OTA LAN. Après redémarrage,
+l'appareil est revenu sur le Wi-Fi, la page Web a répondu HTTP 200 et une
+nouvelle transaction SMA a produit le SN attendu avec TX 94 octets et RX
+560 octets. Trois appels API ont réussi sans erreur pendant ce test post-OTA.
+
+- heap avant transaction post-OTA : 28 752 octets ;
+- minimum heap historique post-OTA : 13 092 octets ;
+- plus grand bloc observé en fin de transaction : 5 876 octets ;
+- heap après déconnexion : 24 736 octets ;
+- plus grand bloc après déconnexion : 6 132 octets.
+
+Verdicts de sortie : `SMA RECONNECT TEST PASS` et `OTA LAN TEST PASS`.
