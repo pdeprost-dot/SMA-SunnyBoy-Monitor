@@ -2287,6 +2287,8 @@ String renderedPage() {
   page.replace("<small>${x.passwordConfigured?'Configuré — ':''}vide : conserver.</small>", "");
   page.replace("<small>Vide : conserver le secret configuré. Redémarrage requis après remplacement.</small>",
                "<small>Redémarrage requis après modification.</small>");
+  page.replace("<label>Mot de passe OTA<div class=\"secret\"><input name=\"otaPassword\"",
+               "<div class=\"panel\"><b>Un seul mot de passe administrateur / OTA</b><p class=\"muted\">Il protège la connexion Web admin, ArduinoOTA et l'installation d'un fichier .bin depuis le navigateur.</p></div><label>Modifier le mot de passe administrateur / OTA<div class=\"secret\"><input name=\"otaPassword\"");
   page.replace("f.apSsid.value=cfg.network.apSsid;wifiConfigured.textContent=cfg.network.passwordConfigured?'— mot de passe configuré':'';",
                "f.apSsid.value=cfg.network.apSsid;f.password.value=cfg.network.password;f.apPassword.value=cfg.network.apPassword;wifiConfigured.textContent='';");
   page.replace("f.interval.value=cfg.mqtt.interval;invFields.innerHTML=",
@@ -2297,7 +2299,7 @@ String renderedPage() {
   page.replace("f.maintenanceMode.checked=cfg.maintenanceMode}",
                "f.maintenanceMode.checked=cfg.maintenanceMode;f.otaPassword.value=cfg.otaPassword;q('#otaForm').auth.value=cfg.otaPassword}");
   page.replace("<label>Mot de passe OTA<input name=\"auth\" type=\"password\" required></label>",
-               "<label>Mot de passe OTA<div class=\"secret\"><input name=\"auth\" type=\"password\" required><button type=\"button\" class=\"reveal\">Afficher</button></div></label>");
+               "<label>Confirmation du mot de passe administrateur / OTA<div class=\"secret\"><input name=\"auth\" type=\"password\" required><button type=\"button\" class=\"reveal\">Afficher</button></div><small>Ce champ ne crée pas un second mot de passe : il autorise uniquement cette installation.</small></label>");
   return page;
 #if 0
   page.replace("<h2>Onduleurs</h2>",

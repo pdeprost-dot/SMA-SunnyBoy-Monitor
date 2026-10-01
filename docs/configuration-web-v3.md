@@ -35,6 +35,10 @@ with HTTP Basic user `admin` and the configured OTA password. It uses the
 Arduino Update OTA partition and reboots only after successful finalization.
 ArduinoOTA remains available unchanged.
 
+The same administrator/OTA password protects three operations: Web UI login,
+ArduinoOTA and browser `.bin` installation. The second password field beside
+the file upload is an authorization confirmation, not a separate credential.
+
 Maintenance suspends planned SMA acquisitions while leaving Wi-Fi, Web, MQTT
 and OTA available. Network changes and OTA-password replacements require a
 reboot. All SMA scheduler, two-attempt limit, network-quiesce Bluetooth
