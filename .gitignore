@@ -7,4 +7,5 @@
 .vscode/
 /local/
 /firmware/SmaBluetoothDiscovery/SmaLocalConfig.h
+/firmware/SmaBluetoothDiscovery/SmaPhase3LocalConfig.h
 
