@@ -83,7 +83,8 @@ utilise comme substitut.
 
 Le firmware generique se configure sans recompilation par NVS et interface Web.
 La navigation separe Dashboard, Onduleurs, Reseau, MQTT, Systeme et Diagnostics.
-Les secrets sont write-only; l'API ne retourne que leur etat configure. Les
+Les secrets sont charges uniquement dans l'interface locale authentifiee,
+masques par defaut et editables avec un bouton Afficher/Masquer. Les
 identites onduleur, Wi-Fi/AP, MQTT, installation, localisation, fuseau horaire
 et mot de passe OTA sont persistants. La mise a jour `.bin` authentifiee depuis
 le navigateur complete ArduinoOTA. Voir `configuration-web-v3.md`.

@@ -14,9 +14,13 @@ and edited through the framework-free Web UI:
   password;
 - **Diagnostics**: scheduler, heap, Bluetooth, MQTT, OTA and bounded logs.
 
-Passwords are write-only. APIs expose only `passwordConfigured` booleans. An
-empty replacement field explicitly means **keep the configured secret**. Reveal
-buttons act only on newly typed browser values.
+The local configuration UI and its secret-bearing API require HTTP Basic
+authentication using the OTA administrator credential. The API returns stored
+passwords only to that authenticated UI.
+Every password input is masked by default and its **Afficher/Masquer** button
+only changes the browser presentation. Values can be edited directly and are
+persisted to NVS on Save. Secrets are never written to Serial, diagnostics,
+MQTT, tracked source files or documentation.
 
 Existing settings were migrated into NVS before the generic firmware was
 installed. The generic build contains no installation identity or SMA

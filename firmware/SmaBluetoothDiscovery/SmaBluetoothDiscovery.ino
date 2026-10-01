@@ -2009,25 +2009,25 @@ String dashboardJson() {
 }
 
 String publicConfigJson() {
-  String json(F("{\"latitude\":")); json.reserve(900);
+  String json(F("{\"latitude\":")); json.reserve(1200);
   json += String(productSettings.latitude, 6); json += F(",\"longitude\":"); json += String(productSettings.longitude, 6);
   json += F(",\"plantName\":\""); json += jsonEscape(productSettings.plantName); json += '"';
   json += F(",\"timezoneName\":\""); json += jsonEscape(productSettings.timezoneName); json += '"';
   preferences.begin("sma-monitor", true);
   const String configuredSsid = preferences.getString("ssid", "");
-  const bool wifiPasswordConfigured = preferences.getString("wifiPass", "").length() > 0;
+  const String configuredWifiPassword = preferences.getString("wifiPass", "");
   preferences.end();
   json += F(",\"network\":{\"ssid\":\""); json += jsonEscape(configuredSsid.c_str()); json += '"';
-  json += F(",\"passwordConfigured\":"); json += wifiPasswordConfigured ? F("true") : F("false");
+  json += F(",\"password\":\""); json += jsonEscape(configuredWifiPassword.c_str()); json += '"';
   json += F(",\"apSsid\":\""); json += jsonEscape(apSsid.c_str()); json += '"';
-  json += F(",\"apPasswordConfigured\":"); json += apPassword.length() ? F("true") : F("false"); json += '}';
-  json += F(",\"otaPasswordConfigured\":"); json += otaPassword.length() ? F("true") : F("false");
+  json += F(",\"apPassword\":\""); json += jsonEscape(apPassword.c_str()); json += F("\"}");
+  json += F(",\"otaPassword\":\""); json += jsonEscape(otaPassword.c_str()); json += '"';
   json += F(",\"maintenanceMode\":"); json += productSettings.maintenanceMode ? F("true") : F("false");
   json += F(",\"timezone\":\""); json += jsonEscape(productSettings.timezone);
   json += F("\",\"mqtt\":{\"enabled\":"); json += mqttOutput.config().enabled ? F("true") : F("false");
   json += F(",\"broker\":\""); json += jsonEscape(mqttOutput.config().broker); json += F("\",\"port\":"); json += mqttOutput.config().port;
   json += F(",\"username\":\""); json += jsonEscape(mqttOutput.config().username); json += F("\",\"prefix\":\""); json += jsonEscape(mqttOutput.config().topicPrefix);
-  json += F("\",\"passwordConfigured\":"); json += mqttOutput.config().password[0] ? F("true") : F("false");
+  json += F("\",\"password\":\""); json += jsonEscape(mqttOutput.config().password); json += '"';
   json += F(",\"connected\":"); json += mqttOutput.connected() ? F("true") : F("false");
   json += F(",\"interval\":"); json += mqttOutput.config().publishIntervalSeconds; json += F("},\"inverters\":[");
   for (size_t i = 0; i < ProductConfig::kInverterCount; ++i) {
@@ -2036,7 +2036,7 @@ String publicConfigJson() {
     json += F(",\"name\":\""); json += jsonEscape(inv.name); json += '"';
     json += F(",\"mac\":\""); json += jsonEscape(inv.mac); json += '"';
     json += F(",\"serial\":"); json += inv.serial;
-    json += F(",\"passwordConfigured\":"); json += inv.userPassword[0] ? F("true") : F("false"); json += '}';
+    json += F(",\"password\":\""); json += jsonEscape(inv.userPassword); json += F("\"}");
   }
   json += F("]}"); return json;
 }
@@ -2278,6 +2278,26 @@ String renderedPage() {
   // not erase unsaved edits.
   page.replace("fill()}catch(e)",
                "if(!window.configLoaded){fill();window.configLoaded=true}}catch(e)");
+  page.replace("Nouveau mot de passe Wi-Fi", "Mot de passe Wi-Fi");
+  page.replace("Nouveau mot de passe AP", "Mot de passe AP");
+  page.replace("Nouveau mot de passe<div", "Mot de passe<div");
+  page.replace("Nouveau mot de passe SMA USER", "Mot de passe SMA USER");
+  page.replace("Nouveau mot de passe OTA", "Mot de passe OTA");
+  page.replace("<small>Vide : conserver le secret configuré.</small>", "");
+  page.replace("<small>${x.passwordConfigured?'Configuré — ':''}vide : conserver.</small>", "");
+  page.replace("<small>Vide : conserver le secret configuré. Redémarrage requis après remplacement.</small>",
+               "<small>Redémarrage requis après modification.</small>");
+  page.replace("f.apSsid.value=cfg.network.apSsid;wifiConfigured.textContent=cfg.network.passwordConfigured?'— mot de passe configuré':'';",
+               "f.apSsid.value=cfg.network.apSsid;f.password.value=cfg.network.password;f.apPassword.value=cfg.network.apPassword;wifiConfigured.textContent='';");
+  page.replace("f.interval.value=cfg.mqtt.interval;invFields.innerHTML=",
+               "f.interval.value=cfg.mqtt.interval;f.password.value=cfg.mqtt.password;invFields.innerHTML=");
+  page.replace("autocomplete=\"new-password\"", "autocomplete=\"current-password\"");
+  page.replace(").join('');f=q('#systemForm')",
+               ").join('');cfg.inverters.forEach((x,n)=>q('#inverterForm')[`inv${n+1}Password`].value=x.password);f=q('#systemForm')");
+  page.replace("f.maintenanceMode.checked=cfg.maintenanceMode}",
+               "f.maintenanceMode.checked=cfg.maintenanceMode;f.otaPassword.value=cfg.otaPassword;q('#otaForm').auth.value=cfg.otaPassword}");
+  page.replace("<label>Mot de passe OTA<input name=\"auth\" type=\"password\" required></label>",
+               "<label>Mot de passe OTA<div class=\"secret\"><input name=\"auth\" type=\"password\" required><button type=\"button\" class=\"reveal\">Afficher</button></div></label>");
   return page;
 #if 0
   page.replace("<h2>Onduleurs</h2>",
@@ -2303,11 +2323,23 @@ void noteHttpRequest(const char* route) {
   if (scanState == ScanState::SCANNING) ++httpDuringScanCount;
 }
 
+bool requireWebConfigAuthentication() {
+  if (server.authenticate("admin", otaPassword.c_str())) return true;
+  server.requestAuthentication();
+  return false;
+}
+
 void registerRoutes() {
-  server.on("/", HTTP_GET, [] { noteHttpRequest("/"); server.send(200, "text/html; charset=utf-8", renderedPage()); });
+  server.on("/", HTTP_GET, [] {
+    if (!requireWebConfigAuthentication()) return;
+    noteHttpRequest("/"); server.send(200, "text/html; charset=utf-8", renderedPage());
+  });
   server.on("/api/status", HTTP_GET, [] { noteHttpRequest("status"); sendJson(statusJson()); });
   server.on("/api/dashboard", HTTP_GET, [] { noteHttpRequest("dashboard"); sendJson(dashboardJson()); });
-  server.on("/api/config", HTTP_GET, [] { noteHttpRequest("config"); sendJson(publicConfigJson()); });
+  server.on("/api/config", HTTP_GET, [] {
+    if (!requireWebConfigAuthentication()) return;
+    noteHttpRequest("config"); sendJson(publicConfigJson());
+  });
   server.on("/api/bt/results", HTTP_GET, [] { noteHttpRequest("results"); sendJson(resultsJson()); });
   server.on("/api/log", HTTP_GET, [] { noteHttpRequest("log"); sendJson(logJson()); });
   server.on("/api/sma/status", HTTP_GET, [] { noteHttpRequest("sma_status"); sendJson(smaStatusJson()); });
@@ -2315,6 +2347,7 @@ void registerRoutes() {
     noteHttpRequest("scheduler_status"); sendJson(schedulerStatusJson());
   });
   server.on("/api/mqtt/config", HTTP_POST, [] {
+    if (!requireWebConfigAuthentication()) return;
     SbfspotCompat::MqttConfig config = mqttOutput.config();
     config.enabled = server.hasArg("enabled") && server.arg("enabled") == "1";
     strlcpy(config.broker, server.arg("broker").c_str(), sizeof(config.broker));
@@ -2328,9 +2361,8 @@ void registerRoutes() {
     config.port = static_cast<uint16_t>(port);
     config.publishIntervalSeconds = static_cast<uint32_t>(interval);
     const String password = server.arg("password");
-    const bool replacePassword = !password.isEmpty();
-    if (replacePassword) strlcpy(config.password, password.c_str(), sizeof(config.password));
-    if (!mqttOutput.save(preferences, config, replacePassword)) {
+    strlcpy(config.password, password.c_str(), sizeof(config.password));
+    if (!mqttOutput.save(preferences, config, true)) {
       sendJson("{\"error\":\"invalid_mqtt_configuration\"}", 400); return;
     }
     addLog("[MQTT] configuration saved enabled=%s broker=%s port=%u prefix=%s interval=%lu",
@@ -2339,6 +2371,7 @@ void registerRoutes() {
     sendJson("{\"saved\":true}");
   });
   server.on("/api/network/config", HTTP_POST, [] {
+    if (!requireWebConfigAuthentication()) return;
     const String ssid = server.arg("ssid"), password = server.arg("password");
     const String fallbackSsid = server.arg("apSsid"), fallbackPassword = server.arg("apPassword");
     if (ssid.isEmpty() || ssid.length() > 32 || password.length() > 64 ||
@@ -2348,13 +2381,14 @@ void registerRoutes() {
     }
     preferences.begin("sma-monitor", false);
     preferences.putString("ssid", ssid);
-    if (!password.isEmpty()) preferences.putString("wifiPass", password);
+    preferences.putString("wifiPass", password);
     preferences.putString("apSsid", fallbackSsid);
-    if (!fallbackPassword.isEmpty()) preferences.putString("apPass", fallbackPassword);
+    preferences.putString("apPass", fallbackPassword);
     preferences.end();
     sendJson("{\"saved\":true,\"restartRequired\":true}");
   });
   server.on("/api/inverters/config", HTTP_POST, [] {
+    if (!requireWebConfigAuthentication()) return;
     ProductConfig::InverterSlot updated[ProductConfig::kInverterCount];
     memcpy(updated, productSettings.inverters, sizeof(updated));
     for (size_t i = 0; i < ProductConfig::kInverterCount; ++i) {
@@ -2371,7 +2405,7 @@ void registerRoutes() {
       strlcpy(updated[i].name, name.c_str(), sizeof(updated[i].name));
       strlcpy(updated[i].mac, mac.c_str(), sizeof(updated[i].mac));
       updated[i].serial = serial;
-      if (!password.isEmpty()) strlcpy(updated[i].userPassword, password.c_str(), sizeof(updated[i].userPassword));
+      strlcpy(updated[i].userPassword, password.c_str(), sizeof(updated[i].userPassword));
     }
     preferences.begin("sma-monitor", false);
     for (size_t i = 0; i < ProductConfig::kInverterCount; ++i) {
@@ -2380,12 +2414,13 @@ void registerRoutes() {
       snprintf(key, sizeof(key), "inv%uMac", static_cast<unsigned>(i + 1)); preferences.putString(key, updated[i].mac);
       snprintf(key, sizeof(key), "inv%uSerial", static_cast<unsigned>(i + 1)); preferences.putUInt(key, updated[i].serial);
       const String password = server.arg("inv" + String(i + 1) + "Password");
-      if (!password.isEmpty()) { snprintf(key, sizeof(key), "inv%uPass", static_cast<unsigned>(i + 1)); preferences.putString(key, password); }
+      snprintf(key, sizeof(key), "inv%uPass", static_cast<unsigned>(i + 1)); preferences.putString(key, password);
     }
     preferences.end(); memcpy(productSettings.inverters, updated, sizeof(updated));
     refreshInverterSnapshot(); sendJson("{\"saved\":true}");
   });
   server.on("/api/system/config", HTTP_POST, [] {
+    if (!requireWebConfigAuthentication()) return;
     const String plant = server.arg("plantName"), zone = server.arg("timezoneName");
     const String otaCandidate = server.arg("otaPassword");
     const double latitude = server.arg("latitude").toDouble(), longitude = server.arg("longitude").toDouble();
@@ -2393,14 +2428,14 @@ void registerRoutes() {
                         zone == "Europe/Brussels" ? "CET-1CEST,M3.5.0,M10.5.0/3" : nullptr;
     if (plant.length() >= sizeof(productSettings.plantName) || !posix ||
         !ProductConfig::validLatitude(latitude) || !ProductConfig::validLongitude(longitude) ||
-        (!otaCandidate.isEmpty() && !ProductConfig::validOtaPassword(otaCandidate.c_str()))) {
+        !ProductConfig::validOtaPassword(otaCandidate.c_str())) {
       sendJson("{\"error\":\"invalid_system_configuration\"}", 400); return;
     }
     preferences.begin("sma-monitor", false);
     preferences.putString("plantName", plant); preferences.putDouble("latitude", latitude);
     preferences.putDouble("longitude", longitude); preferences.putString("tzName", zone);
     preferences.putString("timezone", posix); preferences.putBool("maintenance", server.hasArg("maintenanceMode"));
-    if (!otaCandidate.isEmpty()) preferences.putString("otaPass", otaCandidate);
+    preferences.putString("otaPass", otaCandidate);
     preferences.end();
     strlcpy(productSettings.plantName, plant.c_str(), sizeof(productSettings.plantName));
     productSettings.latitude = latitude; productSettings.longitude = longitude;
@@ -2408,7 +2443,7 @@ void registerRoutes() {
     strlcpy(productSettings.timezone, posix, sizeof(productSettings.timezone));
     productSettings.maintenanceMode = server.hasArg("maintenanceMode");
     setenv("TZ", productSettings.timezone, 1); tzset();
-    sendJson(otaCandidate.isEmpty() ? "{\"saved\":true}" : "{\"saved\":true,\"restartRequired\":true}");
+    sendJson("{\"saved\":true,\"restartRequired\":true}");
   });
   server.on("/api/firmware", HTTP_POST, [] {
     if (!server.authenticate("admin", otaPassword.c_str())) { server.requestAuthentication(); return; }
@@ -2432,6 +2467,7 @@ void registerRoutes() {
     }
   });
   server.on("/api/product/config", HTTP_POST, [] {
+    if (!requireWebConfigAuthentication()) return;
     const bool maintenanceMode = server.hasArg("maintenanceMode");
     const double latitude = server.arg("latitude").toDouble();
     const double longitude = server.arg("longitude").toDouble();
@@ -2555,6 +2591,7 @@ void registerRoutes() {
     sendJson("{\"accepted\":true,\"state\":\"SCANNING\"}", 202);
   });
   server.on("/api/wifi/networks", HTTP_GET, [] {
+    if (!requireWebConfigAuthentication()) return;
     const int count = WiFi.scanNetworks(false, true);
     String json(F("{\"networks\":["));
     for (int index = 0; index < count; ++index) {
