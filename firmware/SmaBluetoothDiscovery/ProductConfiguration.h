@@ -19,6 +19,7 @@ struct InverterSlot {
 };
 
 struct Settings {
+  bool maintenanceMode = false;
   char apPassword[64]{};
   char otaPassword[64]{};
   double latitude = 0;

@@ -59,6 +59,8 @@ arduino-cli upload --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs -p COMx f
 
 ## Documentation
 
+- [Complete SMA dataset and MQTT snapshot V1](docs/complete-dataset-mqtt-v1.md)
+
 - [État du projet](docs/PROJECT_STATE.md)
 - [Audit SMA de Phase 0](docs/phase-0-audit.md)
 - [Protocole de test Phase 1](docs/phase-1-test.md)

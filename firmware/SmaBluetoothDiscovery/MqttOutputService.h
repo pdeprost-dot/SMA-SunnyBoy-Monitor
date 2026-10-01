@@ -16,6 +16,10 @@ class MqttOutputService {
   void tick(bool wifiConnected, bool otaBusy,
             const SbfspotCompat::InverterSnapshot (&snapshots)[ProductConfig::kInverterCount]);
   void disconnect();
+  void requestPublishAll() { publishPendingMask_ = 0x07; }
+  void requestPublish(size_t slot) {
+    if (slot < ProductConfig::kInverterCount) publishPendingMask_ |= static_cast<uint8_t>(1U << slot);
+  }
 
   const SbfspotCompat::MqttConfig& config() const { return config_; }
   bool connected() { return mqtt_.connected(); }
@@ -44,5 +48,6 @@ class MqttOutputService {
   uint32_t lastPublishMs_ = 0;
   size_t nextSlot_ = 0;
   size_t lastPayloadBytes_ = 0;
+  uint8_t publishPendingMask_ = 0;
   char payload_[kPayloadCapacity]{};
 };

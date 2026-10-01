@@ -24,12 +24,18 @@ struct InverterSnapshot {
   char sunset[24]{};
   uint32_t inverterSerial = 0;
   char inverterName[40]{};
+  ValueState inverterNameState = ValueState::NotImplemented;
   char inverterClass[32] = "Solar Inverters";
+  ValueState inverterClassState = ValueState::NotImplemented;
   char inverterType[40]{};
+  ValueState inverterTypeState = ValueState::NotImplemented;
   char inverterSoftwareVersion[24]{};
+  ValueState inverterSoftwareVersionState = ValueState::NotImplemented;
   char inverterStatus[40] = "Information not available";
+  ValueState inverterStatusState = ValueState::NotImplemented;
   Value<int32_t> inverterTemperature;
   char inverterGridRelay[40] = "Information not available";
+  ValueState inverterGridRelayState = ValueState::NotImplemented;
   Value<uint64_t> totalEnergy;
   Value<uint64_t> todayEnergy;
   Value<uint32_t> acTotalPower;

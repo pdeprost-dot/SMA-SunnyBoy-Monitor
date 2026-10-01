@@ -31,6 +31,22 @@ size_t synthetic64(uint8_t* frame, uint16_t packet, uint16_t lri, uint64_t raw) 
   const size_t length = 60; w16(frame, length - 3, SmaPhase3::fcs16(frame + 1, length - 4)); frame[length - 1] = 0x7E;
   return length;
 }
+size_t syntheticString(uint8_t* frame, uint16_t packet, uint16_t lri, const char* value) {
+  std::memset(frame, 0, 84); frame[0] = 0x7E; w32(frame, 1, 0x656003FF); frame[5] = 19;
+  w16(frame, 23, 0); w16(frame, 27, packet | 0x8000); w32(frame, 33, 0); w32(frame, 37, 0);
+  w32(frame, 41, (uint32_t(0x10) << 24) | (uint32_t(lri) << 8)); w32(frame, 45, 123456);
+  std::strncpy(reinterpret_cast<char*>(frame + 49), value, 31);
+  const size_t length = 84; w16(frame, length - 3, SmaPhase3::fcs16(frame + 1, length - 4)); frame[length - 1] = 0x7E;
+  return length;
+}
+size_t syntheticAttribute(uint8_t* frame, uint16_t packet, uint16_t lri, uint32_t tag) {
+  std::memset(frame, 0, 84); frame[0] = 0x7E; w32(frame, 1, 0x656003FF); frame[5] = 19;
+  w16(frame, 23, 0); w16(frame, 27, packet | 0x8000); w32(frame, 33, 0); w32(frame, 37, 0);
+  w32(frame, 41, (uint32_t(0x08) << 24) | (uint32_t(lri) << 8)); w32(frame, 45, 123456);
+  w32(frame, 49, 0x01000000UL | tag); w32(frame, 53, 0x01FFFFFEUL);
+  const size_t length = 84; w16(frame, length - 3, SmaPhase3::fcs16(frame + 1, length - 4)); frame[length - 1] = 0x7E;
+  return length;
+}
 }
 
 int main() {
@@ -65,7 +81,7 @@ int main() {
         SmaPhase3::DecodeResult::Ok && login.inverterSusyId == 123 && login.inverterSerial == 456,
         "login response validation");
 
-  uint8_t frame[80]{}; SmaPhase3::Measurements values{};
+  uint8_t frame[128]{}; SmaPhase3::Measurements values{};
   size_t length = synthetic32(frame, 11, SmaPhase3::kLriAcVoltageL1, 23045);
   check(SmaPhase3::decodeMeasurementResponse(frame, length, 11, values) == SmaPhase3::DecodeResult::Ok &&
         values.acVoltageValid && std::fabs(values.acVoltageV - 230.45f) < 0.01f,
@@ -76,11 +92,24 @@ int main() {
   check(SmaPhase3::decodeMeasurementResponse(frame, 20, 11, values) == SmaPhase3::DecodeResult::BufferTooSmall,
         "truncated frame rejected");
   length = synthetic32(frame, 12, SmaPhase3::kLriAcPower, 0xFFFFFFFF);
-  check(SmaPhase3::decodeMeasurementResponse(frame, length, 12, values) == SmaPhase3::DecodeResult::InvalidValue,
-        "invalid 32-bit sentinel rejected");
+  check(SmaPhase3::decodeMeasurementResponse(frame, length, 12, values) == SmaPhase3::DecodeResult::Ok &&
+        values.acTotalPower.state == SmaPhase3::FieldState::Unavailable && !values.acPowerValid,
+        "invalid 32-bit sentinel preserved as unavailable");
+  values = {}; length = synthetic32(frame, 12, SmaPhase3::kLriAcPower, 0);
+  check(SmaPhase3::decodeMeasurementResponse(frame, length, 12, values) == SmaPhase3::DecodeResult::Ok &&
+        values.acTotalPower.state == SmaPhase3::FieldState::Valid && values.acPowerValid && values.acPowerW == 0,
+        "genuine numeric zero remains valid");
   length = synthetic64(frame, 13, SmaPhase3::kLriTotalEnergy, UINT64_C(123456789));
   check(SmaPhase3::decodeMeasurementResponse(frame, length, 13, values) == SmaPhase3::DecodeResult::Ok &&
         values.totalEnergyValid && values.totalEnergyWh == UINT64_C(123456789),
         "64-bit total energy decoding");
+  values = {}; length = syntheticString(frame, 14, SmaPhase3::kLriInverterName, "Sunny Boy");
+  check(SmaPhase3::decodeMeasurementResponse(frame, length, 14, values) == SmaPhase3::DecodeResult::Ok &&
+        values.inverterNameState == SmaPhase3::FieldState::Valid && !std::strcmp(values.inverterName, "Sunny Boy"),
+        "bounded inverter name decoding");
+  values = {}; length = syntheticAttribute(frame, 15, SmaPhase3::kLriInverterStatus, 307);
+  check(SmaPhase3::decodeMeasurementResponse(frame, length, 15, values) == SmaPhase3::DecodeResult::Ok &&
+        values.inverterStatus.state == SmaPhase3::FieldState::Valid && values.inverterStatus.raw == 307,
+        "selected attribute tag decoding");
   return failures ? 1 : 0;
 }

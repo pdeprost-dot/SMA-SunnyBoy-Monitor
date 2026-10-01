@@ -18,12 +18,19 @@ int main() {
   snapshot.acTotalPower.state = SbfspotCompat::ValueState::Valid;
   snapshot.acTotalPower.value = 2345;
   snapshot.acVoltage1.state = SbfspotCompat::ValueState::Unavailable;
+  snapshot.inverterNameState = SbfspotCompat::ValueState::Valid;
   char payload[1024]; size_t bytes = 0;
   check(SbfspotCompat::serialize(snapshot, payload, sizeof(payload), bytes), "serializer accepts bounded snapshot");
-  check(std::strstr(payload, "\"PrgVersion\"") && std::strstr(payload, "\"InvSleepTm\"") &&
-        std::strstr(payload, "\"PACTot\":2345"), "field names and numeric representation");
-  check(std::strstr(payload, "\"UAC1\":0") && std::strstr(payload, "A\\\\\\\"B"),
-        "unavailable value and JSON escaping");
+  check(std::strstr(payload, "\"timestamp\"") && std::strstr(payload, "\"data_valid\":false") &&
+        std::strstr(payload, "\"ac_power_w\":2345"), "field names and numeric representation");
+  check(std::strstr(payload, "\"ac_voltage_l1_v\":null") && std::strstr(payload, "A\\\\\\\"B"),
+        "unavailable value remains null and JSON escaping works");
+  snapshot.acTotalPower.value = 0;
+  snapshot.acquisitionValid = true;
+  check(SbfspotCompat::serialize(snapshot, payload, sizeof(payload), bytes) &&
+        std::strstr(payload, "\"ac_power_w\":0") &&
+        std::strstr(payload, "\"ac_voltage_l1_v\":null") &&
+        std::strstr(payload, "\"data_valid\":true"), "genuine zero differs from unavailable");
   std::memset(snapshot.inverterName, 'X', sizeof(snapshot.inverterName) - 1);
   snapshot.inverterName[sizeof(snapshot.inverterName) - 1] = 0;
   check(SbfspotCompat::serialize(snapshot, payload, sizeof(payload), bytes), "maximum bounded string");

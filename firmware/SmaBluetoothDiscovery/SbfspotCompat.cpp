@@ -36,11 +36,6 @@ bool appendEscaped(char* output, size_t capacity, size_t& used, const char* valu
   return append(output, capacity, used, "\"");
 }
 
-template <typename T>
-unsigned long long compatibilityNumber(const Value<T>& value) {
-  return value.state == ValueState::Valid ? static_cast<unsigned long long>(value.value) : 0ULL;
-}
-
 bool bounded(const char* value, size_t capacity) {
   return value && memchr(value, 0, capacity) != nullptr;
 }
@@ -62,42 +57,49 @@ bool serialize(const InverterSnapshot& s, char* output, size_t capacity, size_t&
 #define TEXT_FIELD(name, value, comma) \
   do { if (!append(output, capacity, written, comma "\"" name "\":")) return false; \
        if (!appendEscaped(output, capacity, written, value)) return false; } while (0)
-#define NUM_FIELD(name, value) \
-  do { if (!append(output, capacity, written, ",\"" name "\":%llu", compatibilityNumber(value))) return false; } while (0)
+#define NUM_FIELD(name, field) \
+  do { if ((field).state == ValueState::Valid) { \
+         if (!append(output, capacity, written, ",\"" name "\":%llu", \
+                     static_cast<unsigned long long>((field).value))) return false; \
+       } else if (!append(output, capacity, written, ",\"" name "\":null")) return false; } while (0)
+#define SCALED_FIELD(name, field, divisor, decimals) \
+  do { if ((field).state == ValueState::Valid) { \
+         if (!append(output, capacity, written, ",\"" name "\":%.*f", decimals, \
+                     static_cast<double>((field).value) / divisor)) return false; \
+       } else if (!append(output, capacity, written, ",\"" name "\":null")) return false; } while (0)
+#define STATE_TEXT_FIELD(name, value, state) \
+  do { if (!append(output, capacity, written, ",\"" name "\":")) return false; \
+       if ((state) == ValueState::Valid) { if (!appendEscaped(output, capacity, written, value)) return false; } \
+       else if (!append(output, capacity, written, "null")) return false; } while (0)
   if (!append(output, capacity, written, "{")) return false;
-  TEXT_FIELD("PrgVersion", s.programVersion, "");
-  TEXT_FIELD("Plantname", s.plantName, ",");
-  TEXT_FIELD("Timestamp", s.timestamp, ",");
-  TEXT_FIELD("InvTime", s.inverterTime, ",");
-  TEXT_FIELD("SunRise", s.sunrise, ",");
-  TEXT_FIELD("SunSet", s.sunset, ",");
-  if (!append(output, capacity, written, ",\"InvSerial\":%lu", static_cast<unsigned long>(s.inverterSerial))) return false;
-  TEXT_FIELD("InvName", s.inverterName, ",");
-  TEXT_FIELD("InvClass", s.inverterClass, ",");
-  TEXT_FIELD("InvType", s.inverterType, ",");
-  TEXT_FIELD("InvSwVer", s.inverterSoftwareVersion, ",");
-  TEXT_FIELD("InvStatus", s.inverterStatus, ",");
-  NUM_FIELD("InvTemperature", s.inverterTemperature);
-  TEXT_FIELD("InvGridRelay", s.inverterGridRelay, ",");
-  NUM_FIELD("ETotal", s.totalEnergy);
-  NUM_FIELD("EToday", s.todayEnergy);
-  NUM_FIELD("PACTot", s.acTotalPower);
-  NUM_FIELD("PDC1", s.dcPower1);
-  NUM_FIELD("UDC1", s.dcVoltage1);
-  NUM_FIELD("IDC1", s.dcCurrent1);
-  NUM_FIELD("PDCTot", s.dcTotalPower);
-  NUM_FIELD("OperTm", s.operatingTime);
-  NUM_FIELD("FeedTm", s.feedInTime);
-  NUM_FIELD("PAC1", s.acPower1);
-  NUM_FIELD("UAC1", s.acVoltage1);
-  NUM_FIELD("IAC1", s.acCurrent1);
-  NUM_FIELD("GridFreq", s.gridFrequency);
-  NUM_FIELD("BTSignal", s.bluetoothSignal);
-  TEXT_FIELD("InvWakeupTm", s.inverterWakeupTime, ",");
-  TEXT_FIELD("InvSleepTm", s.inverterSleepTime, ",");
-  if (!append(output, capacity, written, "}")) return false;
+  TEXT_FIELD("timestamp", s.timestamp, "");
+  if (!append(output, capacity, written, ",\"serial\":%lu", static_cast<unsigned long>(s.inverterSerial))) return false;
+  STATE_TEXT_FIELD("name", s.inverterName, s.inverterNameState);
+  STATE_TEXT_FIELD("class", s.inverterClass, s.inverterClassState);
+  STATE_TEXT_FIELD("type", s.inverterType, s.inverterTypeState);
+  STATE_TEXT_FIELD("sw_version", s.inverterSoftwareVersion, s.inverterSoftwareVersionState);
+  STATE_TEXT_FIELD("status", s.inverterStatus, s.inverterStatusState);
+  STATE_TEXT_FIELD("grid_relay", s.inverterGridRelay, s.inverterGridRelayState);
+  SCALED_FIELD("temperature_c", s.inverterTemperature, 100.0, 2);
+  SCALED_FIELD("energy_total_kwh", s.totalEnergy, 1000.0, 3);
+  SCALED_FIELD("energy_today_kwh", s.todayEnergy, 1000.0, 3);
+  NUM_FIELD("ac_power_w", s.acTotalPower);
+  NUM_FIELD("ac_power_l1_w", s.acPower1);
+  SCALED_FIELD("ac_voltage_l1_v", s.acVoltage1, 100.0, 2);
+  SCALED_FIELD("ac_current_l1_a", s.acCurrent1, 1000.0, 3);
+  SCALED_FIELD("grid_frequency_hz", s.gridFrequency, 100.0, 2);
+  NUM_FIELD("dc_power_w", s.dcPower1);
+  SCALED_FIELD("dc_voltage_v", s.dcVoltage1, 100.0, 2);
+  SCALED_FIELD("dc_current_a", s.dcCurrent1, 1000.0, 3);
+  SCALED_FIELD("operating_time_h", s.operatingTime, 3600.0, 3);
+  SCALED_FIELD("feed_in_time_h", s.feedInTime, 3600.0, 3);
+  SCALED_FIELD("bt_signal_percent", s.bluetoothSignal, 1000.0, 3);
+  if (!append(output, capacity, written, ",\"data_valid\":%s}",
+              s.acquisitionValid ? "true" : "false")) return false;
 #undef TEXT_FIELD
 #undef NUM_FIELD
+#undef SCALED_FIELD
+#undef STATE_TEXT_FIELD
   return true;
 }
 

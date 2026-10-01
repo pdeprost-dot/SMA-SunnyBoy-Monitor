@@ -11,12 +11,45 @@ constexpr size_t L1_HEADER_SIZE = 18;
 constexpr uint32_t L2_SIGNATURE = 0x656003FFUL;
 constexpr uint16_t APP_SUSY_ID = 125;
 constexpr uint8_t BROADCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+constexpr SmaPhase3::Query DATASET_QUERIES[] = {
+  SmaPhase3::kEnergyQuery,
+  SmaPhase3::kOperatingTimeQuery,
+  SmaPhase3::kDcPowerQuery,
+  SmaPhase3::kDcVoltageCurrentQuery,
+  SmaPhase3::kAcPowerL1Query,
+  SmaPhase3::kAcVoltageCurrentQuery,
+  SmaPhase3::kAcPowerQuery,
+  SmaPhase3::kGridFrequencyQuery,
+  SmaPhase3::kTemperatureQuery,
+  SmaPhase3::kStatusQuery,
+  SmaPhase3::kGridRelayQuery,
+  SmaPhase3::kInverterNameQuery,
+  SmaPhase3::kInverterClassQuery,
+  SmaPhase3::kInverterTypeQuery,
+  SmaPhase3::kSoftwareVersionQuery,
+};
+constexpr size_t DATASET_QUERY_COUNT = sizeof(DATASET_QUERIES) / sizeof(DATASET_QUERIES[0]);
 }
 
 SmaBluetoothClient::SmaBluetoothClient(BluetoothSerial& transport, LogFn logger)
     : transport_(transport), logger_(logger) {
-  memcpy(targetConnectAddress_, SmaLocalConfig::TARGET_CONNECT_ADDRESS, sizeof(targetConnectAddress_));
-  memcpy(targetProtocolAddress_, SmaLocalConfig::TARGET_PROTOCOL_ADDRESS, sizeof(targetProtocolAddress_));
+  setTarget(SmaLocalConfig::TARGET_MAC, SmaLocalConfig::TARGET_SERIAL);
+}
+
+bool SmaBluetoothClient::setTarget(const char* mac, uint32_t serial) {
+  if (state_ != State::DISCONNECTED && state_ != State::ERROR) return false;
+  unsigned values[6]{};
+  char trailing = 0;
+  if (mac == nullptr || serial == 0 ||
+      sscanf(mac, "%2x:%2x:%2x:%2x:%2x:%2x%c", &values[0], &values[1], &values[2],
+             &values[3], &values[4], &values[5], &trailing) != 6) return false;
+  for (size_t index = 0; index < 6; ++index) {
+    if (values[index] > 0xFF) return false;
+    targetConnectAddress_[index] = static_cast<uint8_t>(values[index]);
+    targetProtocolAddress_[5 - index] = static_cast<uint8_t>(values[index]);
+  }
+  expectedSerial_ = serial;
+  return true;
 }
 
 const char* SmaBluetoothClient::stateName() const {
@@ -28,7 +61,7 @@ const char* SmaBluetoothClient::stateName() const {
     case State::WAIT_IDENTITY: return "WAIT_IDENTITY";
     case State::SESSION_READY: return "SESSION_READY";
     case State::WAIT_LOGIN: return "WAIT_LOGIN";
-    case State::WAIT_AC_POWER: return "WAIT_AC_POWER";
+    case State::WAIT_DATASET: return "WAIT_DATASET";
     case State::PHASE3_COMPLETE: return "PHASE3_COMPLETE";
     case State::DISCONNECTING: return "DISCONNECTING";
     case State::ERROR: return "ERROR";
@@ -38,6 +71,23 @@ const char* SmaBluetoothClient::stateName() const {
 
 bool SmaBluetoothClient::bluetoothConnected() const {
   return transport_.connected(0);
+}
+
+const char* SmaBluetoothClient::acPowerClassification() const {
+  if (acPowerValid_) return "PACTOT_VALID";
+  if (acPowerUnavailable_) return "PACTOT_UNAVAILABLE";
+  return "PACTOT_PROTOCOL_ERROR";
+}
+
+bool SmaBluetoothClient::datasetUsable() const {
+  using S = SmaPhase3::FieldState;
+  return measurements_.acTotalPower.state == S::Valid || measurements_.acPower1.state == S::Valid ||
+         measurements_.acVoltage1.state == S::Valid || measurements_.acCurrent1.state == S::Valid ||
+         measurements_.gridFrequency.state == S::Valid || measurements_.dcPower1.state == S::Valid ||
+         measurements_.dcVoltage1.state == S::Valid || measurements_.dcCurrent1.state == S::Valid ||
+         measurements_.totalEnergy.state == S::Valid || measurements_.todayEnergy.state == S::Valid ||
+         measurements_.temperature.state == S::Valid || measurements_.operatingTime.state == S::Valid ||
+         measurements_.feedInTime.state == S::Valid || measurements_.inverterNameState == S::Valid;
 }
 
 void SmaBluetoothClient::emit(const char* format, ...) const {
@@ -66,7 +116,7 @@ void SmaBluetoothClient::setState(State next) {
       case State::WAIT_IDENTITY: return "WAIT_IDENTITY";
       case State::SESSION_READY: return "SESSION_READY";
       case State::WAIT_LOGIN: return "WAIT_LOGIN";
-      case State::WAIT_AC_POWER: return "WAIT_AC_POWER";
+      case State::WAIT_DATASET: return "WAIT_DATASET";
       case State::PHASE3_COMPLETE: return "PHASE3_COMPLETE";
       case State::DISCONNECTING: return "DISCONNECTING";
       case State::ERROR: return "ERROR";
@@ -95,18 +145,34 @@ bool SmaBluetoothClient::requestConnect() {
   loginPacketId_ = 0;
   loginTimestamp_ = 0;
   acPowerValid_ = false;
+  acPowerUnavailable_ = false;
   acPowerW_ = 0;
   acPowerPacketId_ = 0;
   returnedLri_ = 0;
   returnedRecordType_ = 0;
   returnedRecordSize_ = 0;
   measurementTimestamp_ = 0;
+  measurements_ = {};
+  datasetQueryIndex_ = 0;
+  datasetPacketId_ = 0;
+  datasetUnsupportedResponses_ = 0;
+  lastDatasetQueryIndex_ = 0;
+  lastDatasetDecodeResult_ = SmaPhase3::DecodeResult::Ok;
+  memset(datasetL1Fragments_, 0, sizeof(datasetL1Fragments_));
+  memset(datasetL1Bytes_, 0, sizeof(datasetL1Bytes_));
+  memset(datasetL2Packets_, 0, sizeof(datasetL2Packets_));
+  memset(datasetL2Bytes_, 0, sizeof(datasetL2Bytes_));
+  for (size_t index = 0; index < DATASET_DIAGNOSTIC_COUNT; ++index)
+    datasetDecodeResults_[index] = SmaPhase3::DecodeResult::NoData;
+  inverterSusyId_ = 0;
+  inverterSerial_ = 0;
   txBytes_ = 0;
   rxBytes_ = 0;
   packetId_ = 1;
   netId_ = 0;
   memset(localProtocolAddress_, 0, sizeof(localProtocolAddress_));
   resetParser();
+  resetL2Parser();
   connectTaskDone_ = false;
   connectTaskResult_ = false;
   connectTaskStarted_ = false;
@@ -159,6 +225,7 @@ bool SmaBluetoothClient::requestDisconnect() {
        result ? "true" : "false", transport_.connected(0) ? "true" : "false");
   reconnectAllowedAt_ = millis() + RECONNECT_GUARD_MS;
   resetParser();
+  resetL2Parser();
   setState(State::DISCONNECTED);
   logMemory("after_disconnect");
   return result;
@@ -176,7 +243,7 @@ void SmaBluetoothClient::tick() {
       fail("bt_connect_failed");
       return;
     }
-    emit("[SMA] connect target=%s result=connected", SmaLocalConfig::TARGET_MAC);
+    emit("[SMA] connect result=connected");
     logMemory("after_bt_connect");
     deadlineAt_ = millis() + STEP_TIMEOUT_MS;
     setState(State::WAIT_ANNOUNCE);
@@ -184,7 +251,7 @@ void SmaBluetoothClient::tick() {
 
   if (state_ == State::WAIT_ANNOUNCE || state_ == State::WAIT_LOCAL_ADDRESS ||
       state_ == State::WAIT_IDENTITY || state_ == State::SESSION_READY ||
-      state_ == State::WAIT_LOGIN || state_ == State::WAIT_AC_POWER ||
+      state_ == State::WAIT_LOGIN || state_ == State::WAIT_DATASET ||
       state_ == State::PHASE3_COMPLETE) {
     if (!transport_.connected(0)) {
       fail("bt_disconnected");
@@ -195,7 +262,7 @@ void SmaBluetoothClient::tick() {
 
   if ((state_ == State::WAIT_ANNOUNCE || state_ == State::WAIT_LOCAL_ADDRESS ||
        state_ == State::WAIT_IDENTITY || state_ == State::WAIT_LOGIN ||
-       state_ == State::WAIT_AC_POWER) && static_cast<int32_t>(millis() - deadlineAt_) >= 0) {
+       state_ == State::WAIT_DATASET) && static_cast<int32_t>(millis() - deadlineAt_) >= 0) {
     fail("protocol_timeout");
   }
 }
@@ -203,6 +270,32 @@ void SmaBluetoothClient::tick() {
 void SmaBluetoothClient::resetParser() {
   rxPosition_ = 0;
   rxExpected_ = 0;
+}
+
+void SmaBluetoothClient::resetL2Parser() {
+  l2Position_ = 0;
+  l2Active_ = false;
+  l2EscapePending_ = false;
+}
+
+bool SmaBluetoothClient::appendL2Payload(const uint8_t* data, size_t length) {
+  for (size_t index = 0; index < length; ++index) {
+    uint8_t value = data[index];
+    if (l2EscapePending_) {
+      value ^= 0x20;
+      l2EscapePending_ = false;
+    } else if (value == 0x7D) {
+      l2EscapePending_ = true;
+      continue;
+    }
+    if (l2Position_ >= sizeof(l2Frame_)) {
+      fail("l2_overflow");
+      resetL2Parser();
+      return false;
+    }
+    l2Frame_[l2Position_++] = value;
+  }
+  return true;
 }
 
 void SmaBluetoothClient::receiveBytes() {
@@ -282,18 +375,45 @@ void SmaBluetoothClient::processFrame() {
     return;
   }
 
-  if ((state_ == State::WAIT_IDENTITY || state_ == State::WAIT_LOGIN ||
-       state_ == State::WAIT_AC_POWER) && command == 0x0001) {
-    size_t l2Length = 0;
-    bool escaped = false;
-    for (size_t index = L1_HEADER_SIZE; index < rxPosition_; ++index) {
-      uint8_t value = rxFrame_[index];
-      if (escaped) { value ^= 0x20; escaped = false; }
-      else if (value == 0x7D) { escaped = true; continue; }
-      if (l2Length >= sizeof(l2Frame_)) { fail("l2_overflow"); return; }
-      l2Frame_[l2Length++] = value;
+  if (state_ == State::WAIT_IDENTITY || state_ == State::WAIT_LOGIN ||
+      state_ == State::WAIT_DATASET) {
+    const size_t payloadLength = rxPosition_ - L1_HEADER_SIZE;
+    const uint8_t* payload = rxFrame_ + L1_HEADER_SIZE;
+    const bool startsL2 = payloadLength >= 5 && payload[0] == 0x7E &&
+                          read32(payload + 1) == L2_SIGNATURE;
+    if (!l2Active_ && startsL2) {
+      resetL2Parser();
+      l2Active_ = true;
+      emit("[SMA] L2 start cmd=0x%04X fragment_bytes=%u", command,
+           static_cast<unsigned>(payloadLength));
     }
-    if (!processData2Response(l2Frame_, l2Length)) return;
+    if (l2Active_) {
+      if (state_ == State::WAIT_DATASET && datasetQueryIndex_ < DATASET_DIAGNOSTIC_COUNT) {
+        ++datasetL1Fragments_[datasetQueryIndex_];
+        datasetL1Bytes_[datasetQueryIndex_] += static_cast<uint16_t>(rxPosition_);
+      }
+      if (!appendL2Payload(payload, payloadLength)) return;
+      emit("[SMA] L2 fragment cmd=0x%04X accumulated=%u", command,
+           static_cast<unsigned>(l2Position_));
+      if (command == 0x0001) {
+        if (l2EscapePending_) {
+          fail("l2_dangling_escape");
+          resetL2Parser();
+          return;
+        }
+        const size_t completeLength = l2Position_;
+        if (state_ == State::WAIT_DATASET && datasetQueryIndex_ < DATASET_DIAGNOSTIC_COUNT) {
+          ++datasetL2Packets_[datasetQueryIndex_];
+          datasetL2Bytes_[datasetQueryIndex_] += static_cast<uint16_t>(completeLength);
+        }
+        l2Active_ = false;
+        if (!processData2Response(l2Frame_, completeLength)) {
+          resetL2Parser();
+          return;
+        }
+        resetL2Parser();
+      }
+    }
   }
 }
 
@@ -402,19 +522,27 @@ bool SmaBluetoothClient::sendLoginRequest() {
   return true;
 }
 
-bool SmaBluetoothClient::sendAcPowerRequest(uint16_t inverterSusyId, uint32_t inverterSerial) {
-  acPowerPacketId_ = ++packetId_;
+bool SmaBluetoothClient::sendNextDatasetRequest(uint16_t inverterSusyId, uint32_t inverterSerial) {
+  if (datasetQueryIndex_ >= DATASET_QUERY_COUNT) {
+    setState(State::PHASE3_COMPLETE);
+    return true;
+  }
+  const SmaPhase3::Query& query = DATASET_QUERIES[datasetQueryIndex_];
+  datasetPacketId_ = ++packetId_;
+  if (query.first == SmaPhase3::kAcPowerQuery.first) acPowerPacketId_ = datasetPacketId_;
   uint8_t l2[64];
   const size_t l2Length = SmaPhase3::buildQueryL2(
-      l2, sizeof(l2), acPowerPacketId_, APP_SUSY_ID, appSerial_,
-      inverterSusyId, inverterSerial, SmaPhase3::kAcPowerQuery);
+      l2, sizeof(l2), datasetPacketId_, APP_SUSY_ID, appSerial_,
+      inverterSusyId, inverterSerial, query);
   const size_t frameLength = wrapL2(l2, l2Length, txFrame_, sizeof(txFrame_));
   if (frameLength == 0) return false;
-  emit("[PHASE3] ac_power TX packet_id=%u command=0x51000200 first=0x00263F00 last=0x00263FFF",
-       acPowerPacketId_);
-  if (!sendRaw(txFrame_, frameLength, "ac_power_0x263F")) return false;
+  emit("[DATASET] TX index=%u packet_id=%u command=0x%08lX first=0x%08lX last=0x%08lX",
+       static_cast<unsigned>(datasetQueryIndex_), datasetPacketId_,
+       static_cast<unsigned long>(query.command), static_cast<unsigned long>(query.first),
+       static_cast<unsigned long>(query.last));
+  if (!sendRaw(txFrame_, frameLength, "dataset_query")) return false;
   deadlineAt_ = millis() + STEP_TIMEOUT_MS;
-  setState(State::WAIT_AC_POWER);
+  setState(State::WAIT_DATASET);
   return true;
 }
 
@@ -440,7 +568,7 @@ bool SmaBluetoothClient::processData2Response(const uint8_t* l2, size_t length) 
       fail(loginStatus_ == 0x0100 ? "phase3_login_invalid_password" : "phase3_login_invalid_response");
       return false;
     }
-    if (response.inverterSerial != SmaLocalConfig::TARGET_SERIAL) {
+    if (response.inverterSerial != expectedSerial_) {
       fail("phase3_login_serial_mismatch");
       return false;
     }
@@ -448,35 +576,66 @@ bool SmaBluetoothClient::processData2Response(const uint8_t* l2, size_t length) 
     ++validResponses_;
     lastValidResponseAt_ = millis();
     logMemory("after_login");
-    if (!sendAcPowerRequest(response.inverterSusyId, response.inverterSerial)) {
-      fail("phase3_ac_power_tx_failed");
+    inverterSusyId_ = response.inverterSusyId;
+    inverterSerial_ = response.inverterSerial;
+    datasetQueryIndex_ = 0;
+    if (!sendNextDatasetRequest(inverterSusyId_, inverterSerial_)) {
+      fail("phase3_dataset_tx_failed");
       return false;
     }
     return true;
   }
-  if (state_ == State::WAIT_AC_POWER) {
-    SmaPhase3::Measurements values{};
+  if (state_ == State::WAIT_DATASET) {
+    const uint16_t remainingPackets = length >= 29
+        ? static_cast<uint16_t>(l2[25] | (static_cast<uint16_t>(l2[26]) << 8))
+        : 0;
     const SmaPhase3::DecodeResult result =
-        SmaPhase3::decodeMeasurementResponse(l2, length, acPowerPacketId_, values);
-    emit("[PHASE3] ac_power RX len=%u packet_id=%u result=%u lri=0x%04X type=0x%02X record_size=%u raw=%llu watts=%lu timestamp=%lu",
-         static_cast<unsigned>(length), acPowerPacketId_, static_cast<unsigned>(result),
-         values.returnedLri, values.recordType, values.recordSize,
-         static_cast<unsigned long long>(values.rawValue), static_cast<unsigned long>(values.acPowerW),
-         static_cast<unsigned long>(values.timestamp));
-    if (result != SmaPhase3::DecodeResult::Ok || !values.acPowerValid) {
-      fail("phase3_ac_power_response_unknown");
+        SmaPhase3::decodeMeasurementResponse(l2, length, datasetPacketId_, measurements_);
+    lastDatasetQueryIndex_ = datasetQueryIndex_;
+    lastDatasetDecodeResult_ = result;
+    if (datasetQueryIndex_ < DATASET_DIAGNOSTIC_COUNT)
+      datasetDecodeResults_[datasetQueryIndex_] = result;
+    emit("[DATASET] RX index=%u len=%u packet_id=%u remaining=%u result=%u lri=0x%04X type=0x%02X record_size=%u raw=%llu timestamp=%lu",
+         static_cast<unsigned>(datasetQueryIndex_), static_cast<unsigned>(length), datasetPacketId_,
+         remainingPackets, static_cast<unsigned>(result), measurements_.returnedLri, measurements_.recordType,
+         measurements_.recordSize, static_cast<unsigned long long>(measurements_.rawValue),
+         static_cast<unsigned long>(measurements_.timestamp));
+    if (result == SmaPhase3::DecodeResult::InvalidFcs ||
+        result == SmaPhase3::DecodeResult::PacketIdMismatch ||
+        result == SmaPhase3::DecodeResult::InvalidStructure) {
+      fail("phase3_dataset_invalid_response");
       return false;
     }
-    acPowerValid_ = true;
-    acPowerW_ = values.acPowerW;
-    returnedLri_ = values.returnedLri;
-    returnedRecordType_ = values.recordType;
-    returnedRecordSize_ = values.recordSize;
-    measurementTimestamp_ = values.timestamp;
+    if (result == SmaPhase3::DecodeResult::UnsupportedRecord ||
+        result == SmaPhase3::DecodeResult::InvalidValue ||
+        result == SmaPhase3::DecodeResult::NoData ||
+        result == SmaPhase3::DecodeResult::DeviceError ||
+        result == SmaPhase3::DecodeResult::BufferTooSmall) ++datasetUnsupportedResponses_;
+    acPowerValid_ = measurements_.acTotalPower.state == SmaPhase3::FieldState::Valid;
+    acPowerUnavailable_ = measurements_.acTotalPower.state == SmaPhase3::FieldState::Unavailable;
+    acPowerW_ = acPowerValid_ ? static_cast<uint32_t>(measurements_.acTotalPower.raw) : 0;
+    returnedLri_ = measurements_.returnedLri;
+    returnedRecordType_ = measurements_.recordType;
+    returnedRecordSize_ = measurements_.recordSize;
+    measurementTimestamp_ = measurements_.acTotalPower.timestamp;
     ++validResponses_;
     lastValidResponseAt_ = millis();
-    logMemory("after_ac_power");
-    setState(State::PHASE3_COMPLETE);
+    logMemory("after_dataset_response");
+    // A range response may span several Data2+ packets. Offset 25 contains
+    // SMA's remaining-packet countdown; keep the same query active until zero.
+    if (result == SmaPhase3::DecodeResult::Ok && remainingPackets > 0) {
+      deadlineAt_ = millis() + STEP_TIMEOUT_MS;
+      return true;
+    }
+    ++datasetQueryIndex_;
+    if (datasetQueryIndex_ >= DATASET_QUERY_COUNT) {
+      setState(State::PHASE3_COMPLETE);
+      return true;
+    }
+    if (!sendNextDatasetRequest(inverterSusyId_, inverterSerial_)) {
+      fail("phase3_dataset_tx_failed");
+      return false;
+    }
     return true;
   }
   return false;
@@ -513,9 +672,9 @@ bool SmaBluetoothClient::decodeIdentity(const uint8_t* l2, size_t length) {
   const uint16_t receivedPacketId = read16(l2 + 27) & 0x7FFF;
   if (receivedPacketId != packetId_) { fail("identity_packet_id_mismatch"); return false; }
   decodedSerial_ = read32(l2 + 57);
-  if (decodedSerial_ != SmaLocalConfig::TARGET_SERIAL) {
+  if (decodedSerial_ != expectedSerial_) {
     emit("[SMA] identity serial=%lu expected=%lu", static_cast<unsigned long>(decodedSerial_),
-         static_cast<unsigned long>(SmaLocalConfig::TARGET_SERIAL));
+         static_cast<unsigned long>(expectedSerial_));
     fail("identity_serial_mismatch");
     return false;
   }

@@ -92,13 +92,18 @@ void MqttOutputService::tick(bool wifiConnected, bool otaBusy,
   }
   mqtt_.loop();
   const uint32_t interval = config_.publishIntervalSeconds * 1000UL;
-  if (lastPublishMs_ && now - lastPublishMs_ < interval) return;
+  if (!publishPendingMask_ && lastPublishMs_ && now - lastPublishMs_ < interval) return;
   size_t slot = nextSlot_;
-  for (size_t checked = 0; checked < ProductConfig::kInverterCount && !snapshots[slot].acquisitionValid; ++checked)
+  for (size_t checked = 0; checked < ProductConfig::kInverterCount; ++checked) {
+    const bool requested = !publishPendingMask_ || (publishPendingMask_ & (1U << slot));
+    if (requested && snapshots[slot].acquisitionValid) break;
+    if (publishPendingMask_ && requested) publishPendingMask_ &= ~(1U << slot);
     slot = (slot + 1) % ProductConfig::kInverterCount;
+  }
   if (!snapshots[slot].acquisitionValid) return;  // Never publish placeholder data.
   size_t bytes = 0;
   if (!SbfspotCompat::serialize(snapshots[slot], payload_, sizeof(payload_), bytes)) {
+    publishPendingMask_ &= ~(1U << slot);
     ++publishFailures_;
     lastPayloadBytes_ = 0;
     lastPublishMs_ = now;
@@ -106,9 +111,12 @@ void MqttOutputService::tick(bool wifiConnected, bool otaBusy,
   }
   lastPayloadBytes_ = bytes;
   char publishTopic[64];
-  if (!topic(slot, publishTopic, sizeof(publishTopic))) { ++publishFailures_; return; }
+  if (!topic(slot, publishTopic, sizeof(publishTopic))) {
+    publishPendingMask_ &= ~(1U << slot); ++publishFailures_; return;
+  }
   if (mqtt_.publish(publishTopic, reinterpret_cast<const uint8_t*>(payload_), bytes, true)) ++publishCount_;
   else ++publishFailures_;
+  publishPendingMask_ &= ~(1U << slot);
   lastPublishMs_ = now;
   nextSlot_ = (slot + 1) % ProductConfig::kInverterCount;
 }
