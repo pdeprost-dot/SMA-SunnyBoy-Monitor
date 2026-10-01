@@ -1,5 +1,4 @@
 #include "SmaBluetoothClient.h"
-#include "SmaPhase3LocalConfig.h"
 #include "SmaPhase3Protocol.h"
 
 #include <esp_heap_caps.h>
@@ -32,9 +31,7 @@ constexpr size_t DATASET_QUERY_COUNT = sizeof(DATASET_QUERIES) / sizeof(DATASET_
 }
 
 SmaBluetoothClient::SmaBluetoothClient(BluetoothSerial& transport, LogFn logger)
-    : transport_(transport), logger_(logger) {
-  setTarget(SmaLocalConfig::TARGET_MAC, SmaLocalConfig::TARGET_SERIAL);
-}
+    : transport_(transport), logger_(logger) {}
 
 bool SmaBluetoothClient::setTarget(const char* mac, uint32_t serial) {
   if (state_ != State::DISCONNECTED && state_ != State::ERROR) return false;
@@ -505,13 +502,21 @@ bool SmaBluetoothClient::startPhase3Transaction() {
   return sendLoginRequest();
 }
 
+bool SmaBluetoothClient::setUserPassword(const char* value) {
+  if (!value) return false;
+  const size_t length = strnlen(value, sizeof(userPassword_));
+  if (length == 0 || length > SmaPhase3::kPasswordLength) return false;
+  strlcpy(userPassword_, value, sizeof(userPassword_));
+  return true;
+}
+
 bool SmaBluetoothClient::sendLoginRequest() {
   loginTimestamp_ = static_cast<uint32_t>(time(nullptr));
   loginPacketId_ = ++packetId_;
   uint8_t l2[96];
   const size_t l2Length = SmaPhase3::buildLoginL2(
       l2, sizeof(l2), loginPacketId_, APP_SUSY_ID, appSerial_,
-      SmaPhase3::UserRole::User, loginTimestamp_, SmaPhase3LocalConfig::USER_PASSWORD);
+      SmaPhase3::UserRole::User, loginTimestamp_, userPassword_);
   const size_t frameLength = wrapL2(l2, l2Length, txFrame_, sizeof(txFrame_));
   if (frameLength == 0) return false;
   emit("[PHASE3] login TX packet_id=%u timestamp=%lu app_serial=%lu role=USER", loginPacketId_,

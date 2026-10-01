@@ -78,3 +78,12 @@ indisponible et acquisition nocturne partielle.
 `bt_signal_percent` reste `null` car il exige une transaction SMA L1 distincte
 (`control=0x03`, payload `05 00`, octet 22 x 100/255). Le RSSI ESP n'est pas
 utilise comme substitut.
+
+## Configuration/Web V3
+
+Le firmware generique se configure sans recompilation par NVS et interface Web.
+La navigation separe Dashboard, Onduleurs, Reseau, MQTT, Systeme et Diagnostics.
+Les secrets sont write-only; l'API ne retourne que leur etat configure. Les
+identites onduleur, Wi-Fi/AP, MQTT, installation, localisation, fuseau horaire
+et mot de passe OTA sont persistants. La mise a jour `.bin` authentifiee depuis
+le navigateur complete ArduinoOTA. Voir `configuration-web-v3.md`.

@@ -4,12 +4,12 @@
 #include <Preferences.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <Update.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <time.h>
 
 #include "SmaBluetoothClient.h"
-#include "SmaLocalConfig.h"
 #include "MqttOutputService.h"
 #include "ProductConfiguration.h"
 
@@ -456,6 +456,8 @@ void loadProductSettings() {
   productSettings.maintenanceMode = preferences.getBool("maintenance", false);
   String value = preferences.getString("apPass", "");
   if (ProductConfig::validWpaPassword(value.c_str())) strlcpy(productSettings.apPassword, value.c_str(), sizeof(productSettings.apPassword));
+  value = preferences.getString("apSsid", "");
+  if (value.length() <= 32) strlcpy(productSettings.apSsid, value.c_str(), sizeof(productSettings.apSsid));
   value = preferences.getString("plantName", "");
   if (value.length() < sizeof(productSettings.plantName))
     strlcpy(productSettings.plantName, value.c_str(), sizeof(productSettings.plantName));
@@ -464,17 +466,28 @@ void loadProductSettings() {
   value = preferences.getString("timezone", "CET-1CEST,M3.5.0,M10.5.0/3");
   if (!value.isEmpty() && value.length() < sizeof(productSettings.timezone))
     strlcpy(productSettings.timezone, value.c_str(), sizeof(productSettings.timezone));
+  value = preferences.getString("tzName", "Europe/Brussels");
+  if (value.length() < sizeof(productSettings.timezoneName))
+    strlcpy(productSettings.timezoneName, value.c_str(), sizeof(productSettings.timezoneName));
   for (size_t i = 0; i < ProductConfig::kInverterCount; ++i) {
     char key[12];
     snprintf(key, sizeof(key), "inv%uEn", static_cast<unsigned>(i + 1));
-    productSettings.inverters[i].enabled = preferences.getBool(key, i == 0);
+    productSettings.inverters[i].enabled = preferences.getBool(key, false);
     snprintf(key, sizeof(key), "inv%uMac", static_cast<unsigned>(i + 1));
-    value = preferences.getString(key, SmaLocalConfig::KNOWN_SMAS[i].mac);
+    value = preferences.getString(key, "");
     strlcpy(productSettings.inverters[i].mac, value.c_str(), sizeof(productSettings.inverters[i].mac));
     snprintf(key, sizeof(key), "inv%uSerial", static_cast<unsigned>(i + 1));
-    productSettings.inverters[i].serial = preferences.getUInt(key, SmaLocalConfig::KNOWN_SMAS[i].serial);
-    snprintf(productSettings.inverters[i].name, sizeof(productSettings.inverters[i].name), "INV%u",
-             static_cast<unsigned>(i + 1));
+    productSettings.inverters[i].serial = preferences.getUInt(key, 0);
+    snprintf(key, sizeof(key), "inv%uName", static_cast<unsigned>(i + 1));
+    value = preferences.getString(key, "");
+    if (value.isEmpty()) snprintf(productSettings.inverters[i].name, sizeof(productSettings.inverters[i].name),
+                                  "INV%u", static_cast<unsigned>(i + 1));
+    else strlcpy(productSettings.inverters[i].name, value.c_str(), sizeof(productSettings.inverters[i].name));
+    snprintf(key, sizeof(key), "inv%uPass", static_cast<unsigned>(i + 1));
+    value = preferences.getString(key, "");
+    if (value.length() <= SmaPhase3::kPasswordLength)
+      strlcpy(productSettings.inverters[i].userPassword, value.c_str(),
+              sizeof(productSettings.inverters[i].userPassword));
   }
   preferences.end();
   setenv("TZ", productSettings.timezone, 1); tzset();
@@ -770,6 +783,7 @@ bool startSafeSmaAcquisition(size_t slot) {
       bluetoothReady || smaLifecycleState != SmaLifecycleState::BT_OFF) return false;
   const auto& inverter = productSettings.inverters[slot];
   if (!ProductConfig::validMac(inverter.mac) || !ProductConfig::validSerial(inverter.serial) ||
+      !smaClient.setUserPassword(inverter.userPassword) ||
       !smaClient.setTarget(inverter.mac, inverter.serial)) return false;
   const uint32_t beforeInternal =
       heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -799,7 +813,8 @@ bool startCombinedSmaAcquisition() {
     if (!inverter.enabled || !ProductConfig::validMac(inverter.mac) ||
         !ProductConfig::validSerial(inverter.serial)) return false;
   }
-  if (!smaClient.setTarget(productSettings.inverters[0].mac,
+  if (!smaClient.setUserPassword(productSettings.inverters[0].userPassword) ||
+      !smaClient.setTarget(productSettings.inverters[0].mac,
                            productSettings.inverters[0].serial)) return false;
   const uint32_t beforeInternal =
       heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -1607,7 +1622,8 @@ void serviceSmaLifecycle() {
             }
             const size_t nextSlot = smaSelectedSlot + 1;
             const auto& target = productSettings.inverters[nextSlot];
-            if (!smaClient.setTarget(target.mac, target.serial)) {
+            if (!smaClient.setUserPassword(target.userPassword) ||
+                !smaClient.setTarget(target.mac, target.serial)) {
               failSmaLifecycle("inter_inverter_target_failed");
               break;
             }
@@ -1657,8 +1673,9 @@ String jsonEscape(const char* value) {
 }
 
 int8_t knownSmaIndex(const char* mac) {
-  for (size_t index = 0; index < std::size(SmaLocalConfig::KNOWN_SMAS); ++index) {
-    if (strcasecmp(mac, SmaLocalConfig::KNOWN_SMAS[index].mac) == 0) return static_cast<int8_t>(index);
+  for (size_t index = 0; index < ProductConfig::kInverterCount; ++index) {
+    if (productSettings.inverters[index].enabled &&
+        strcasecmp(mac, productSettings.inverters[index].mac) == 0) return static_cast<int8_t>(index);
   }
   return -1;
 }
@@ -1695,8 +1712,8 @@ void onBtDevice(BTAdvertisedDevice* device) {
          incoming.haveCod ? "" : "n/a ", static_cast<unsigned long>(incoming.cod),
          incoming.knownIndex >= 0 ? " MATCH" : "");
   if (incoming.knownIndex >= 0) {
-    const SmaLocalConfig::Device& sma = SmaLocalConfig::KNOWN_SMAS[incoming.knownIndex];
-    addLog("[BT] MATCH %s SN=%lu", sma.label, static_cast<unsigned long>(sma.serial));
+    const auto& sma = productSettings.inverters[incoming.knownIndex];
+    addLog("[BT] MATCH %s SN=%lu", sma.name, static_cast<unsigned long>(sma.serial));
   }
 }
 
@@ -1805,8 +1822,8 @@ String resultsJson() {
     json += F(",\"cod\":"); if (item.haveCod) json += item.cod; else json += F("null");
     json += F(",\"sma\":");
     if (item.knownIndex >= 0) {
-      const SmaLocalConfig::Device& sma = SmaLocalConfig::KNOWN_SMAS[item.knownIndex];
-      json += F("{\"label\":\""); json += sma.label; json += F("\",\"serial\":"); json += sma.serial; json += '}';
+      const auto& sma = productSettings.inverters[item.knownIndex];
+      json += F("{\"label\":\""); json += sma.name; json += F("\",\"serial\":"); json += sma.serial; json += '}';
     } else json += F("null");
     json += '}';
   }
@@ -1817,7 +1834,7 @@ String resultsJson() {
 String statusJson() {
   String json;
   json.reserve(2000);
-  json += F("{\"firmwareVersion\":\"SMA-SunnyBoy-Monitor 2.0\",\"uptimeMs\":"); json += millis() - bootAt;
+  json += F("{\"firmwareVersion\":\"SMA-SunnyBoy-Monitor 3.0\",\"uptimeMs\":"); json += millis() - bootAt;
   json += F(",\"system\":{\"lastResetReason\":\""); json += resetReasonName(bootResetReason);
   json += F("\",\"lastResetCode\":"); json += static_cast<unsigned>(bootResetReason);
   json += F(",\"previousLifecycleCheckpoint\":\""); json += checkpointName(previousCheckpoint);
@@ -1832,6 +1849,8 @@ String statusJson() {
   json += F(",\"ip\":\""); json += WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String();
   json += F("\",\"rssi\":"); if (WiFi.status() == WL_CONNECTED) json += WiFi.RSSI(); else json += F("null");
   json += F(",\"apSsid\":"); if (apActive) { json += '"'; json += apSsid; json += '"'; } else json += F("null");
+  json += F(",\"staSsid\":\""); json += jsonEscape(WiFi.SSID().c_str()); json += '"';
+  json += F(",\"apIp\":"); if (apActive) { json += '"'; json += WiFi.softAPIP().toString(); json += '"'; } else json += F("null");
   json += F("},\"bluetooth\":{\"ready\":"); json += bluetoothReady ? F("true") : F("false");
   json += F(",\"scanState\":\""); json += scanStateName(scanState);
   json += F("\",\"scanCycle\":"); json += scanNumber;
@@ -1872,7 +1891,24 @@ String statusJson() {
   json += F(",\"inv2Open\":"); json += rfcommDelayResult.inv2Open ? F("true") : F("false");
   json += F(",\"heapIntegrity\":"); json += rfcommDelayResult.heapIntegrity ? F("true") : F("false");
   json += '}';
-  json += F("},\"ota\":{\"busy\":"); json += otaBusy ? F("true") : F("false"); json += F("}}");
+  const time_t now = currentUnixTime();
+  char localTime[24]{}, offset[8]{};
+  tm local{};
+  if (timeSynchronized() && localtime_r(&now, &local)) strftime(offset, sizeof(offset), "%z", &local);
+  ProductConfig::formatLocalTime(now, localTime, sizeof(localTime));
+  time_t rise = 0, set = 0; char riseText[24]{}, setText[24]{};
+  if (ProductConfig::calculateSunTimes(now, productSettings.latitude, productSettings.longitude, rise, set)) {
+    ProductConfig::formatLocalTime(rise, riseText, sizeof(riseText));
+    ProductConfig::formatLocalTime(set, setText, sizeof(setText));
+  }
+  json += F("},\"time\":{\"synchronized\":"); json += timeSynchronized() ? F("true") : F("false");
+  json += F(",\"local\":\""); json += localTime; json += F("\",\"utcOffset\":\""); json += offset;
+  json += F("\",\"dst\":"); json += local.tm_isdst > 0 ? F("true") : F("false");
+  json += F(",\"timezone\":\""); json += productSettings.timezoneName;
+  json += F("\",\"sunrise\":"); if (riseText[0]) { json += '"'; json += riseText; json += '"'; } else json += F("null");
+  json += F(",\"sunset\":"); if (setText[0]) { json += '"'; json += setText; json += '"'; } else json += F("null");
+  json += F("},\"ota\":{\"busy\":"); json += otaBusy ? F("true") : F("false");
+  json += F(",\"ready\":true,\"browserUpdate\":true}}");
   return json;
 }
 
@@ -1976,16 +2012,31 @@ String publicConfigJson() {
   String json(F("{\"latitude\":")); json.reserve(900);
   json += String(productSettings.latitude, 6); json += F(",\"longitude\":"); json += String(productSettings.longitude, 6);
   json += F(",\"plantName\":\""); json += jsonEscape(productSettings.plantName); json += '"';
+  json += F(",\"timezoneName\":\""); json += jsonEscape(productSettings.timezoneName); json += '"';
+  preferences.begin("sma-monitor", true);
+  const String configuredSsid = preferences.getString("ssid", "");
+  const bool wifiPasswordConfigured = preferences.getString("wifiPass", "").length() > 0;
+  preferences.end();
+  json += F(",\"network\":{\"ssid\":\""); json += jsonEscape(configuredSsid.c_str()); json += '"';
+  json += F(",\"passwordConfigured\":"); json += wifiPasswordConfigured ? F("true") : F("false");
+  json += F(",\"apSsid\":\""); json += jsonEscape(apSsid.c_str()); json += '"';
+  json += F(",\"apPasswordConfigured\":"); json += apPassword.length() ? F("true") : F("false"); json += '}';
+  json += F(",\"otaPasswordConfigured\":"); json += otaPassword.length() ? F("true") : F("false");
   json += F(",\"maintenanceMode\":"); json += productSettings.maintenanceMode ? F("true") : F("false");
   json += F(",\"timezone\":\""); json += jsonEscape(productSettings.timezone);
   json += F("\",\"mqtt\":{\"enabled\":"); json += mqttOutput.config().enabled ? F("true") : F("false");
   json += F(",\"broker\":\""); json += jsonEscape(mqttOutput.config().broker); json += F("\",\"port\":"); json += mqttOutput.config().port;
   json += F(",\"username\":\""); json += jsonEscape(mqttOutput.config().username); json += F("\",\"prefix\":\""); json += jsonEscape(mqttOutput.config().topicPrefix);
-  json += F("\",\"interval\":"); json += mqttOutput.config().publishIntervalSeconds; json += F("},\"inverters\":[");
+  json += F("\",\"passwordConfigured\":"); json += mqttOutput.config().password[0] ? F("true") : F("false");
+  json += F(",\"connected\":"); json += mqttOutput.connected() ? F("true") : F("false");
+  json += F(",\"interval\":"); json += mqttOutput.config().publishIntervalSeconds; json += F("},\"inverters\":[");
   for (size_t i = 0; i < ProductConfig::kInverterCount; ++i) {
     if (i) json += ','; const auto& inv = productSettings.inverters[i];
     json += F("{\"enabled\":"); json += inv.enabled ? F("true") : F("false");
-    json += F(",\"serial\":"); json += inv.serial; json += '}';
+    json += F(",\"name\":\""); json += jsonEscape(inv.name); json += '"';
+    json += F(",\"mac\":\""); json += jsonEscape(inv.mac); json += '"';
+    json += F(",\"serial\":"); json += inv.serial;
+    json += F(",\"passwordConfigured\":"); json += inv.userPassword[0] ? F("true") : F("false"); json += '}';
   }
   json += F("]}"); return json;
 }
@@ -2212,11 +2263,21 @@ const char WIFI_CONFIGURATION_SECTION[] PROGMEM = R"HTML(<section><h2>Wi-Fi</h2>
 
 const char PAGE_V2[] PROGMEM = R"HTML(<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SMA SunnyBoy Monitor</title><style>:root{--bg:#eef3f7;--card:#fff;--ink:#17212b;--muted:#64717d}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px system-ui,sans-serif}.wrap{max-width:1180px;margin:auto;padding:18px}header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px}h1{font-size:24px;margin:0}.chips{display:flex;flex-wrap:wrap;gap:7px}.chip,.badge{padding:5px 9px;border-radius:999px;background:#dde7ef;font-size:12px}.ok{background:#dff4ea;color:#087147}.partial{background:#fff0d6;color:#8b5300}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.card,details{background:var(--card);border-radius:14px;box-shadow:0 3px 14px #1b304012;padding:17px}.card h2{font-size:17px;margin:0}.hero{font-size:38px;font-weight:750;margin:14px 0 3px}.sub,.muted{color:var(--muted)}.metrics{display:grid;grid-template-columns:1fr auto;gap:8px 12px;border-top:1px solid #e8edf1;margin-top:15px;padding-top:14px}.metrics b{text-align:right}.meta{margin-top:14px;font-size:12px;color:var(--muted)}.summary{display:flex;gap:24px;margin:14px 0 18px;padding:13px 16px;background:#dfeaf2;border-radius:12px}details{margin-top:14px}summary{cursor:pointer;font-weight:700}fieldset{border:1px solid #dce4ea;border-radius:9px;margin:12px 0}label{display:block;margin:8px 0}input,button{padding:8px;max-width:100%}input:not([type=checkbox]){width:100%}pre{white-space:pre-wrap;max-height:300px;overflow:auto;font-size:12px}@media(max-width:800px){.grid{grid-template-columns:1fr}header{align-items:flex-start;flex-direction:column}.hero{font-size:34px}}</style></head><body><div class="wrap"><header><div><h1>SMA SunnyBoy Monitor</h1><div class="muted" id="version">Chargement...</div></div><div class="chips" id="system"></div></header><div class="summary"><b id="totalP">Puissance totale : —</b><b id="totalE">Energie du jour : —</b></div><main id="cards" class="grid"></main><details><summary>Configuration</summary><form method="post" action="/api/product/config"><fieldset><legend>Basic</legend><label>Nom installation <input name="plantName" maxlength="39"></label><label><input name="maintenanceMode" type="checkbox" value="1"> Maintenance</label><label>Latitude <input name="latitude" type="number" step="0.000001" min="-90" max="90"></label><label>Longitude <input name="longitude" type="number" step="0.000001" min="-180" max="180"></label><label>Fuseau POSIX <input name="timezone" maxlength="63"></label></fieldset><fieldset><legend>Advanced</legend><label>Mot de passe AP <input name="apPassword" type="password" maxlength="63" placeholder="vide = conserver"></label><label>Mot de passe OTA <input name="otaPassword" type="password" maxlength="63" placeholder="vide = conserver"></label><label><input name="mqttEnabled" type="checkbox" value="1"> MQTT actif</label><label>Broker <input name="broker" maxlength="63"></label><label>Port <input name="port" type="number" min="1" max="65535"></label><label>Utilisateur <input name="username" maxlength="39"></label><label>Mot de passe MQTT <input name="mqttPassword" type="password" maxlength="63" placeholder="vide = conserver"></label><label>Prefixe <input name="prefix" maxlength="47"></label><label>Intervalle (s) <input name="interval" type="number" min="10" max="86400"></label></fieldset><div id="invConfig"></div><button>Enregistrer</button></form></details><details><summary>Diagnostics</summary><pre id="status"></pre><pre id="log"></pre></details></div><script>const dash=(v,u,d=2)=>v==null?'—':`${Number(v).toFixed(d)} ${u}`,whole=(v,u)=>v==null?'—':`${v} ${u}`;async function get(u){const r=await fetch(u),t=await r.text();if(!r.ok)throw Error(t);return t?JSON.parse(t):{}}function card(x){const state=x.acquisitionResult==='success'?'Complet':x.acquisitionResult==='partial'?'Partiel / nuit':'Non acquis',cls=x.acquisitionResult==='success'?'ok':x.acquisitionResult==='partial'?'partial':'';return `<article class="card"><div style="display:flex;justify-content:space-between;gap:8px"><h2>${x.name}${x.inverterName?` · ${x.inverterName}`:''}</h2><span class="badge ${cls}">${state}</span></div><div class="hero">${whole(x.pac,'W')}</div><div class="sub">AC total</div><div class="metrics"><span>DC total</span><b>${whole(x.pdcTotal,'W')}</b><span>EToday</span><b>${dash(x.eToday,'kWh',3)}</b><span>ETotal</span><b>${dash(x.eTotal,'kWh',3)}</b><span>AC L1</span><b>${whole(x.pac1,'W')}</b><span>AC tension / courant</span><b>${dash(x.uac,'V')} / ${dash(x.iac,'A',3)}</b><span>Frequence</span><b>${dash(x.frequency,'Hz')}</b><span>DC tension / courant</span><b>${dash(x.udc,'V')} / ${dash(x.idc,'A',3)}</b><span>Temperature</span><b>${dash(x.temperature,'°C')}</b><span>Statut / relais</span><b>${x.status??'—'} / ${x.gridRelay??'—'}</b></div><div class="meta">Derniere acquisition : ${x.lastSuccess??'—'} · ${x.inverterType??'—'} · ${x.softwareVersion??'—'}</div></article>`}async function refresh(){try{const [s,d,l]=await Promise.all([get('/api/status'),get('/api/dashboard'),get('/api/log')]);version.textContent=s.firmwareVersion;system.innerHTML=`<span class="chip ${s.wifi.connected?'ok':''}">WiFi ${s.wifi.connected?'OK':'OFF'}</span><span class="chip ${s.mqtt.mqttConnected?'ok':''}">MQTT ${s.mqtt.mqttConnected?'OK':'OFF'}</span><span class="chip">Scheduler ${d.scheduler.state}</span><span class="chip">Uptime ${Math.floor(s.uptimeMs/3600000)} h</span>`;cards.innerHTML=d.inverters.map(card).join('');const ps=d.inverters.map(x=>x.pac);totalP.textContent=ps.every(x=>x!=null)?`Puissance totale : ${ps.reduce((a,b)=>a+b,0)} W`:'Puissance totale : —';const es=d.inverters.map(x=>x.eToday);totalE.textContent=es.every(x=>x!=null)?`Energie du jour : ${es.reduce((a,b)=>a+b,0).toFixed(3)} kWh`:'Energie du jour : —';status.textContent=JSON.stringify(s,null,2);log.textContent=l.lines.join('\n')}catch(e){system.textContent=e}}invConfig.innerHTML=[1,2,3].map(i=>`<fieldset><legend>INV${i}</legend><label><input name="inv${i}Enabled" type="checkbox" value="1"> Actif</label><label>Numero de serie <input name="inv${i}Serial" type="number" min="1" max="4294967295"></label></fieldset>`).join('');async function loadConfig(){const c=await get('/api/config'),f=document.forms[0];f.plantName.value=c.plantName;f.maintenanceMode.checked=c.maintenanceMode;f.latitude.value=c.latitude;f.longitude.value=c.longitude;f.timezone.value=c.timezone;f.mqttEnabled.checked=c.mqtt.enabled;f.broker.value=c.mqtt.broker;f.port.value=c.mqtt.port;f.username.value=c.mqtt.username;f.prefix.value=c.mqtt.prefix;f.interval.value=c.mqtt.interval;c.inverters.forEach((x,n)=>{const i=n+1;f[`inv${i}Enabled`].checked=x.enabled;f[`inv${i}Serial`].value=x.serial})}loadConfig();refresh();setInterval(refresh,5000);</script></body></html>)HTML";
 
+const char PAGE_V3[] PROGMEM = R"HTML(<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SMA Monitor</title><style>*{box-sizing:border-box}:root{--bg:#eef3f7;--card:#fff;--ink:#17212b;--muted:#667580;--accent:#0874c9}body{margin:0;background:var(--bg);color:var(--ink);font:14px system-ui}header{background:#173149;color:#fff}.bar,.wrap{max-width:1180px;margin:auto;padding:14px 18px}.bar{display:flex;align-items:center;gap:20px}.brand{font-size:19px;font-weight:750;margin-right:auto}nav{display:flex;gap:4px;flex-wrap:wrap}nav button{border:0;background:transparent;color:#dce9f4;padding:9px;border-radius:7px}nav button.active{background:#ffffff20;color:#fff}.wrap{padding-top:20px}.page{display:none}.page.active{display:block}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.card,.panel{background:var(--card);border-radius:13px;box-shadow:0 3px 14px #1b304012;padding:17px}.hero{font-size:38px;font-weight:750;margin:12px 0}.metrics{display:grid;grid-template-columns:1fr auto;gap:8px 12px;border-top:1px solid #e5ebef;padding-top:12px}.metrics b{text-align:right}.chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}.chip,.badge{background:#dfe8ef;padding:5px 9px;border-radius:99px;font-size:12px}.ok{background:#dff4ea;color:#087147}.partial{background:#fff0d6;color:#8b5300}.muted{color:var(--muted)}form{max-width:720px}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}label{display:block;margin:10px 0}input,select,button{font:inherit;padding:9px;border:1px solid #cbd6de;border-radius:7px}input:not([type=checkbox]),select{width:100%}.secret{display:flex;gap:6px}.secret input{flex:1}.actions{display:flex;gap:8px;margin-top:16px}.primary{background:var(--accent);color:#fff;border-color:var(--accent)}.dirty{color:#a76500}table{width:100%;border-collapse:collapse}td,th{padding:7px;border-bottom:1px solid #e4eaee;text-align:left}pre{white-space:pre-wrap;max-height:360px;overflow:auto;font-size:12px}@media(max-width:800px){.bar{align-items:flex-start;flex-direction:column}.brand{margin:0}.grid,.row{grid-template-columns:1fr}}</style></head><body><header><div class="bar"><div class="brand">SMA SunnyBoy Monitor</div><nav id="nav"></nav></div></header><div class="wrap"><div id="notice" class="muted"></div>
+<section id="Dashboard" class="page active"><div id="chips" class="chips"></div><div id="totals" class="panel"></div><br><div id="cards" class="grid"></div></section>
+<section id="Inverters" class="page"><h2>Onduleurs</h2><form id="inverterForm"><div id="invFields"></div><div class="actions"><button class="primary">Enregistrer</button><button type="button" class="cancel">Annuler</button><span class="dirty"></span></div></form></section>
+<section id="Network" class="page"><h2>Réseau</h2><div id="networkState" class="panel"></div><form id="networkForm"><label>Réseau Wi-Fi <span id="wifiConfigured"></span><select name="ssid" id="ssid"></select></label><button type="button" id="scan">Scanner</button><label>Nouveau mot de passe Wi-Fi<div class="secret"><input name="password" type="password" maxlength="64" autocomplete="new-password"><button type="button" class="reveal">Afficher</button></div><small>Vide : conserver le secret configuré.</small></label><label>SSID du point d'accès de secours<input name="apSsid" maxlength="32"></label><label>Nouveau mot de passe AP<div class="secret"><input name="apPassword" type="password" maxlength="63" autocomplete="new-password"><button type="button" class="reveal">Afficher</button></div><small>Vide : conserver le secret configuré.</small></label><div class="actions"><button class="primary">Enregistrer</button><button type="button" class="cancel">Annuler</button><span class="dirty"></span></div><p class="muted">Redémarrage requis pour appliquer le réseau/AP.</p></form></section>
+<section id="MQTT" class="page"><h2>MQTT</h2><div id="mqttState" class="panel"></div><form id="mqttForm"><label><input name="enabled" type="checkbox" value="1"> Activé</label><div class="row"><label>Broker<input name="broker" maxlength="63"></label><label>Port<input name="port" type="number" min="1" max="65535"></label></div><label>Utilisateur<input name="username" maxlength="39"></label><label>Nouveau mot de passe<div class="secret"><input name="password" type="password" maxlength="63" autocomplete="new-password"><button type="button" class="reveal">Afficher</button></div><small>Vide : conserver le secret configuré.</small></label><label>Préfixe des topics<input name="prefix" maxlength="47"></label><label>Intervalle (s)<input name="interval" type="number" min="10" max="86400"></label><div class="actions"><button class="primary">Enregistrer</button><button type="button" class="cancel">Annuler</button><span class="dirty"></span></div></form></section>
+<section id="System" class="page"><h2>Système</h2><div id="clock" class="panel"></div><form id="systemForm"><label>Nom de l'installation<input name="plantName" maxlength="39"></label><div class="row"><label>Latitude<input name="latitude" type="number" step=".000001" min="-90" max="90"></label><label>Longitude<input name="longitude" type="number" step=".000001" min="-180" max="180"></label></div><label>Fuseau horaire<select name="timezoneName"><option>Europe/Brussels</option><option>UTC</option></select></label><label><input name="maintenanceMode" type="checkbox" value="1"> Mode maintenance</label><p class="muted">Suspend les acquisitions planifiées, mais maintient Wi-Fi, Web, MQTT et OTA.</p><label>Nouveau mot de passe OTA<div class="secret"><input name="otaPassword" type="password" maxlength="63" autocomplete="new-password"><button type="button" class="reveal">Afficher</button></div><small>Vide : conserver le secret configuré. Redémarrage requis après remplacement.</small></label><div class="actions"><button class="primary">Enregistrer</button><button type="button" class="cancel">Annuler</button><span class="dirty"></span></div></form><hr><h3>Mise à jour firmware (.bin)</h3><form id="otaForm"><label>Mot de passe OTA<input name="auth" type="password" required></label><input name="firmware" type="file" accept=".bin" required><button class="primary">Installer</button><progress id="progress" max="100" value="0"></progress><span id="otaResult"></span></form></section>
+<section id="Diagnostics" class="page"><h2>Diagnostics</h2><pre id="diag"></pre><pre id="logs"></pre></section></div><script>
+const pages=['Dashboard','Inverters','Network','MQTT','System','Diagnostics'],q=s=>document.querySelector(s),qa=s=>[...document.querySelectorAll(s)];let cfg,status,dash,scheduler,sma;nav.innerHTML=pages.map(x=>`<button data-page="${x}">${x}</button>`).join('');function show(p){qa('.page').forEach(x=>x.classList.toggle('active',x.id===p));qa('nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===p))}nav.onclick=e=>{if(e.target.dataset.page)show(e.target.dataset.page)};show('Dashboard');const val=(v,u='',d)=>v==null?'—':`${d==null?v:Number(v).toFixed(d)}${u?' '+u:''}`;async function get(u){let r=await fetch(u);if(!r.ok)throw Error(await r.text());return r.json()}async function post(u,f){let r=await fetch(u,{method:'POST',body:new FormData(f)});if(!r.ok)throw Error(await r.text());return r.json()}function card(x){let partial=x.acquisitionResult==='partial';return `<article class="card"><div><b>${x.name}</b> <span class="badge ${partial?'partial':'ok'}">${partial?'Partiel / nuit':'Complet'}</span></div><div class="hero">${val(x.pac,'W')}</div><div class="metrics"><span>DC total</span><b>${val(x.pdcTotal,'W')}</b><span>EToday / ETotal</span><b>${val(x.eToday,'kWh',3)} / ${val(x.eTotal,'kWh',3)}</b><span>AC L1</span><b>${val(x.pac1,'W')}</b><span>AC V / A / Hz</span><b>${val(x.uac,'V',2)} / ${val(x.iac,'A',3)} / ${val(x.frequency,'Hz',2)}</b><span>DC V / A</span><b>${val(x.udc,'V',2)} / ${val(x.idc,'A',3)}</b><span>Température</span><b>${val(x.temperature,'°C',2)}</b><span>Statut / relais</span><b>${x.status??'—'} / ${x.gridRelay??'—'}</b></div><p class="muted">${x.lastSuccess??'Jamais'} · ${x.inverterType??'—'}</p></article>`}function fill(){let f=q('#networkForm');f.ssid.innerHTML=`<option>${cfg.network.ssid}</option>`;f.apSsid.value=cfg.network.apSsid;wifiConfigured.textContent=cfg.network.passwordConfigured?'— mot de passe configuré':'';f=q('#mqttForm');f.enabled.checked=cfg.mqtt.enabled;['broker','port','username','prefix'].forEach(k=>f[k].value=cfg.mqtt[k]);f.interval.value=cfg.mqtt.interval;invFields.innerHTML=cfg.inverters.map((x,n)=>`<div class="panel"><h3>INV${n+1}</h3><label><input name="inv${n+1}Enabled" type="checkbox" value="1" ${x.enabled?'checked':''}> Activé</label><label>Nom convivial<input name="inv${n+1}Name" value="${x.name}" maxlength="23"></label><label>Adresse Bluetooth<input name="inv${n+1}Mac" value="${x.mac}" maxlength="17"></label><label>Numéro de série<input name="inv${n+1}Serial" value="${x.serial}" type="number"></label><label>Nouveau mot de passe SMA USER<div class="secret"><input name="inv${n+1}Password" type="password" maxlength="12" autocomplete="new-password"><button type="button" class="reveal">Afficher</button></div><small>${x.passwordConfigured?'Configuré — ':''}vide : conserver.</small></label></div>`).join('');f=q('#systemForm');['plantName','latitude','longitude','timezoneName'].forEach(k=>f[k].value=cfg[k]);f.maintenanceMode.checked=cfg.maintenanceMode}async function refresh(){try{[cfg,status,dash,scheduler,sma]=await Promise.all(['/api/config','/api/status','/api/dashboard','/api/scheduler/status','/api/sma/status'].map(get));chips.innerHTML=`<span class="chip ${status.wifi.connected?'ok':''}">WiFi ${status.wifi.connected?'OK':'OFF'}</span><span class="chip ${status.mqtt.mqttConnected?'ok':''}">MQTT ${status.mqtt.mqttConnected?'OK':'OFF'}</span><span class="chip">${scheduler.state}</span><span class="chip">${status.firmwareVersion}</span>`;cards.innerHTML=dash.inverters.map(card).join('');let p=dash.inverters.map(x=>x.pac),e=dash.inverters.map(x=>x.eToday);totals.textContent=`Puissance totale : ${p.every(x=>x!=null)?p.reduce((a,b)=>a+b,0)+' W':'—'} · EToday : ${e.every(x=>x!=null)?e.reduce((a,b)=>a+b,0).toFixed(3)+' kWh':'—'}`;networkState.textContent=`STA ${status.wifi.connected?'connecté '+status.wifi.ip:'déconnecté'} · AP ${status.wifi.apIp??'inactif'}`;mqttState.textContent=`${status.mqtt.mqttConnected?'Connecté':'Déconnecté'} · publications ${status.mqtt.publishCount} · erreurs ${status.mqtt.publishFailures}`;clock.textContent=`${status.time.local} · ${status.time.timezone} · UTC ${status.time.utcOffset} · DST ${status.time.dst?'actif':'inactif'} · NTP ${status.time.synchronized?'OK':'non synchronisé'} · lever ${status.time.sunrise??'—'} · coucher ${status.time.sunset??'—'}`;diag.textContent=JSON.stringify({status,scheduler,sma},null,2);logs.textContent=(await get('/api/log')).lines.join('\n');fill()}catch(e){notice.textContent=e}}qa('form:not(#otaForm)').forEach(f=>{f.oninput=()=>q(`#${f.id} .dirty`).textContent='Modifications non enregistrées';f.querySelector('.cancel').onclick=()=>{fill();q(`#${f.id} .dirty`).textContent=''}});q('#networkForm').onsubmit=async e=>{e.preventDefault();await post('/api/network/config',e.target);notice.textContent='Réseau enregistré — redémarrage requis'};q('#mqttForm').onsubmit=async e=>{e.preventDefault();await post('/api/mqtt/config',e.target);notice.textContent='MQTT enregistré';await refresh()};q('#inverterForm').onsubmit=async e=>{e.preventDefault();await post('/api/inverters/config',e.target);notice.textContent='Onduleurs enregistrés';await refresh()};q('#systemForm').onsubmit=async e=>{e.preventDefault();let r=await post('/api/system/config',e.target);notice.textContent=r.restartRequired?'Système enregistré — redémarrage requis':'Système enregistré';await refresh()};document.body.onclick=e=>{if(e.target.classList.contains('reveal')){let i=e.target.previousElementSibling;i.type=i.type==='password'?'text':'password';e.target.textContent=i.type==='password'?'Afficher':'Masquer'}};scan.onclick=async()=>{scan.disabled=true;let n=await get('/api/wifi/networks');ssid.innerHTML=n.networks.map(x=>`<option>${x.ssid}</option>`).join('');scan.disabled=false};q('#otaForm').onsubmit=e=>{e.preventDefault();let f=e.target,fd=new FormData();fd.append('firmware',f.firmware.files[0]);let x=new XMLHttpRequest();x.open('POST','/api/firmware');x.setRequestHeader('Authorization','Basic '+btoa('admin:'+f.auth.value));x.upload.onprogress=p=>progress.value=p.lengthComputable?p.loaded*100/p.total:0;x.onload=()=>otaResult.textContent=x.status===200?'Installé, redémarrage…':'Échec '+x.responseText;x.onerror=()=>otaResult.textContent='Connexion interrompue';x.send(fd)};refresh();setInterval(refresh,10000);</script></body></html>)HTML";
+
 String renderedPage() {
-  String page(FPSTR(PAGE_V2));
-  page.reserve(page.length() + strlen_P(WIFI_CONFIGURATION_SECTION) + 320);
-  page.replace("<details><summary>Diagnostics",
-               String(FPSTR(WIFI_CONFIGURATION_SECTION)) + "<details><summary>Diagnostics");
+  String page(FPSTR(PAGE_V3));
+  // Configuration forms are filled once so periodic operational refreshes do
+  // not erase unsaved edits.
+  page.replace("fill()}catch(e)",
+               "if(!window.configLoaded){fill();window.configLoaded=true}}catch(e)");
   return page;
 #if 0
   page.replace("<h2>Onduleurs</h2>",
@@ -2276,6 +2337,99 @@ void registerRoutes() {
            config.enabled ? "true" : "false", config.broker, config.port, config.topicPrefix,
            static_cast<unsigned long>(config.publishIntervalSeconds));
     sendJson("{\"saved\":true}");
+  });
+  server.on("/api/network/config", HTTP_POST, [] {
+    const String ssid = server.arg("ssid"), password = server.arg("password");
+    const String fallbackSsid = server.arg("apSsid"), fallbackPassword = server.arg("apPassword");
+    if (ssid.isEmpty() || ssid.length() > 32 || password.length() > 64 ||
+        fallbackSsid.isEmpty() || fallbackSsid.length() > 32 ||
+        (!fallbackPassword.isEmpty() && !ProductConfig::validWpaPassword(fallbackPassword.c_str()))) {
+      sendJson("{\"error\":\"invalid_network_configuration\"}", 400); return;
+    }
+    preferences.begin("sma-monitor", false);
+    preferences.putString("ssid", ssid);
+    if (!password.isEmpty()) preferences.putString("wifiPass", password);
+    preferences.putString("apSsid", fallbackSsid);
+    if (!fallbackPassword.isEmpty()) preferences.putString("apPass", fallbackPassword);
+    preferences.end();
+    sendJson("{\"saved\":true,\"restartRequired\":true}");
+  });
+  server.on("/api/inverters/config", HTTP_POST, [] {
+    ProductConfig::InverterSlot updated[ProductConfig::kInverterCount];
+    memcpy(updated, productSettings.inverters, sizeof(updated));
+    for (size_t i = 0; i < ProductConfig::kInverterCount; ++i) {
+      const String base = "inv" + String(i + 1);
+      const String name = server.arg(base + "Name"), mac = server.arg(base + "Mac");
+      const String password = server.arg(base + "Password");
+      const uint32_t serial = strtoul(server.arg(base + "Serial").c_str(), nullptr, 10);
+      if (name.isEmpty() || name.length() >= ProductConfig::kNameCapacity ||
+          !ProductConfig::validMac(mac.c_str()) || !ProductConfig::validSerial(serial) ||
+          password.length() > SmaPhase3::kPasswordLength) {
+        sendJson("{\"error\":\"invalid_inverter_configuration\"}", 400); return;
+      }
+      updated[i].enabled = server.hasArg(base + "Enabled");
+      strlcpy(updated[i].name, name.c_str(), sizeof(updated[i].name));
+      strlcpy(updated[i].mac, mac.c_str(), sizeof(updated[i].mac));
+      updated[i].serial = serial;
+      if (!password.isEmpty()) strlcpy(updated[i].userPassword, password.c_str(), sizeof(updated[i].userPassword));
+    }
+    preferences.begin("sma-monitor", false);
+    for (size_t i = 0; i < ProductConfig::kInverterCount; ++i) {
+      char key[12]; snprintf(key, sizeof(key), "inv%uEn", static_cast<unsigned>(i + 1)); preferences.putBool(key, updated[i].enabled);
+      snprintf(key, sizeof(key), "inv%uName", static_cast<unsigned>(i + 1)); preferences.putString(key, updated[i].name);
+      snprintf(key, sizeof(key), "inv%uMac", static_cast<unsigned>(i + 1)); preferences.putString(key, updated[i].mac);
+      snprintf(key, sizeof(key), "inv%uSerial", static_cast<unsigned>(i + 1)); preferences.putUInt(key, updated[i].serial);
+      const String password = server.arg("inv" + String(i + 1) + "Password");
+      if (!password.isEmpty()) { snprintf(key, sizeof(key), "inv%uPass", static_cast<unsigned>(i + 1)); preferences.putString(key, password); }
+    }
+    preferences.end(); memcpy(productSettings.inverters, updated, sizeof(updated));
+    refreshInverterSnapshot(); sendJson("{\"saved\":true}");
+  });
+  server.on("/api/system/config", HTTP_POST, [] {
+    const String plant = server.arg("plantName"), zone = server.arg("timezoneName");
+    const String otaCandidate = server.arg("otaPassword");
+    const double latitude = server.arg("latitude").toDouble(), longitude = server.arg("longitude").toDouble();
+    const char* posix = zone == "UTC" ? "UTC0" :
+                        zone == "Europe/Brussels" ? "CET-1CEST,M3.5.0,M10.5.0/3" : nullptr;
+    if (plant.length() >= sizeof(productSettings.plantName) || !posix ||
+        !ProductConfig::validLatitude(latitude) || !ProductConfig::validLongitude(longitude) ||
+        (!otaCandidate.isEmpty() && !ProductConfig::validOtaPassword(otaCandidate.c_str()))) {
+      sendJson("{\"error\":\"invalid_system_configuration\"}", 400); return;
+    }
+    preferences.begin("sma-monitor", false);
+    preferences.putString("plantName", plant); preferences.putDouble("latitude", latitude);
+    preferences.putDouble("longitude", longitude); preferences.putString("tzName", zone);
+    preferences.putString("timezone", posix); preferences.putBool("maintenance", server.hasArg("maintenanceMode"));
+    if (!otaCandidate.isEmpty()) preferences.putString("otaPass", otaCandidate);
+    preferences.end();
+    strlcpy(productSettings.plantName, plant.c_str(), sizeof(productSettings.plantName));
+    productSettings.latitude = latitude; productSettings.longitude = longitude;
+    strlcpy(productSettings.timezoneName, zone.c_str(), sizeof(productSettings.timezoneName));
+    strlcpy(productSettings.timezone, posix, sizeof(productSettings.timezone));
+    productSettings.maintenanceMode = server.hasArg("maintenanceMode");
+    setenv("TZ", productSettings.timezone, 1); tzset();
+    sendJson(otaCandidate.isEmpty() ? "{\"saved\":true}" : "{\"saved\":true,\"restartRequired\":true}");
+  });
+  server.on("/api/firmware", HTTP_POST, [] {
+    if (!server.authenticate("admin", otaPassword.c_str())) { server.requestAuthentication(); return; }
+    const bool ok = !Update.hasError();
+    sendJson(ok ? "{\"updated\":true,\"restarting\":true}" : "{\"error\":\"update_failed\"}", ok ? 200 : 500);
+    if (ok) { delay(250); ESP.restart(); }
+    else otaBusy = false;
+  }, [] {
+    if (!server.authenticate("admin", otaPassword.c_str())) return;
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      if (bluetoothReady || schedulerAcquisitionActive || otaBusy) { Update.abort(); return; }
+      otaBusy = true;
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) Update.printError(Serial);
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) Update.printError(Serial);
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (!Update.end(true)) Update.printError(Serial);
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+      Update.abort(); otaBusy = false;
+    }
   });
   server.on("/api/product/config", HTTP_POST, [] {
     const bool maintenanceMode = server.hasArg("maintenanceMode");
@@ -2518,6 +2672,7 @@ void setup() {
   apSsid = "SMA-Monitor-" + String(suffix);
   apPassword = "SMAsetup-" + String(suffix);
   loadProductSettings();
+  if (productSettings.apSsid[0]) apSsid = productSettings.apSsid;
   if (productSettings.apPassword[0]) apPassword = productSettings.apPassword;
 
   addLog("=== SMA SunnyBoy Monitor - Remote Dev Base ===");

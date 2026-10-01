@@ -18,7 +18,7 @@ struct InverterSnapshot {
   bool acquisitionComplete = false;
   uint32_t lastSuccessfulAcquisition = 0;
   char schemaVersion[8] = "2";
-  char firmwareVersion[40] = "SMA-SunnyBoy-Monitor 2.0";
+  char firmwareVersion[40] = "SMA-SunnyBoy-Monitor 3.0";
   char plantName[40]{};
   char timestamp[24]{};
   char inverterTime[24]{};

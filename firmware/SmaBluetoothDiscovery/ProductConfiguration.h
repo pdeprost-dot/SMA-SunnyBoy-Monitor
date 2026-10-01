@@ -9,23 +9,26 @@ namespace ProductConfig {
 constexpr size_t kInverterCount = 3;
 constexpr size_t kTopicPrefixCapacity = 48;
 constexpr size_t kMacCapacity = 18;
-constexpr size_t kNameCapacity = 16;
+constexpr size_t kNameCapacity = 24;
 
 struct InverterSlot {
   bool enabled = false;
   char mac[kMacCapacity]{};
   uint32_t serial = 0;
   char name[kNameCapacity]{};
+  char userPassword[13]{};
 };
 
 struct Settings {
   bool maintenanceMode = false;
   char plantName[40]{};
   char apPassword[64]{};
+  char apSsid[33]{};
   char otaPassword[64]{};
   double latitude = 0;
   double longitude = 0;
   char timezone[64] = "CET-1CEST,M3.5.0,M10.5.0/3";
+  char timezoneName[32] = "Europe/Brussels";
   InverterSlot inverters[kInverterCount];
 };
 

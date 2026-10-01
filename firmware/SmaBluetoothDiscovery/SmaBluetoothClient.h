@@ -2,7 +2,6 @@
 
 #include <Arduino.h>
 #include <BluetoothSerial.h>
-#include "SmaLocalConfig.h"
 #include "SmaPhase3Protocol.h"
 
 class SmaBluetoothClient {
@@ -30,6 +29,7 @@ class SmaBluetoothClient {
   bool requestDisconnect();
   void tick();
   void setAppSerial(uint32_t value) { appSerial_ = value; }
+  bool setUserPassword(const char* value);
 
   State state() const { return state_; }
   const char* stateName() const;
@@ -109,6 +109,7 @@ class SmaBluetoothClient {
   bool l2EscapePending_ = false;
   uint16_t packetId_ = 1;
   uint32_t appSerial_ = 0;
+  char userPassword_[SmaPhase3::kPasswordLength + 1]{};
   volatile UBaseType_t connectTaskStackHighWater_ = 0;
   uint8_t netId_ = 0;
   uint32_t decodedSerial_ = 0;

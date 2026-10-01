@@ -149,9 +149,9 @@ reste donc `null` sans substitution par le RSSI ESP.
 Validation : sunset avec zero valide PASS, nuit joignable/partielle PASS.
 Le reveil naturel du matin reste **NOT YET TESTED**.
 
-Copier `firmware/SmaBluetoothDiscovery/SmaLocalConfig.example.h` vers
-`SmaLocalConfig.h`, puis renseigner les identifiants locaux. Ce fichier et les
-credentials restent ignorés par Git.
+Le firmware générique se configure entièrement via Web UI V3 et NVS. Il ne
+contient aucune identité d'installation ni credential SMA et ne requiert
+aucune recompilation pour une installation normale.
 
 ```powershell
 arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs firmware/SmaBluetoothDiscovery
@@ -160,6 +160,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs firmware
 ## Documentation
 
 - [Dataset complet et MQTT Snapshot V1](docs/complete-dataset-mqtt-v1.md)
+- [Configuration et Web UI V3](docs/configuration-web-v3.md)
 - [État du projet](docs/PROJECT_STATE.md)
 - [Audit SMA Phase 0](docs/phase-0-audit.md)
 - [Résultat Phase 1](docs/phase-1-result-final.md)
