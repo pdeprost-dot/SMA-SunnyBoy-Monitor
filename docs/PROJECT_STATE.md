@@ -61,3 +61,20 @@ soleil et nuit. Aucun résultat de cette observation n'est encore déclaré PASS
 - interface M5Stack Core2 ;
 - PZEM/RS485 ;
 - tag ou release golden finale.
+
+## MQTT/Web V2 et transition jour/nuit
+
+Le schema V2 ajoute versions de schema/firmware, nom d'installation optionnel,
+temps onduleur, lever/coucher du soleil, puissance DC totale, heures de
+reveil/sommeil, `data_complete` et `acquisition_result`. Les tags relais 51 et
+311 deviennent `Closed` et `Open`; l'attribut special `0x00FFFFFD` devient
+`null`. Le dashboard responsive presente trois cartes et distingue zero,
+indisponible et acquisition nocturne partielle.
+
+- sunset avec zero valide : PASS ;
+- nuit joignable avec dataset partiel : PASS ;
+- reveil naturel du matin : **NOT YET TESTED**.
+
+`bt_signal_percent` reste `null` car il exige une transaction SMA L1 distincte
+(`control=0x03`, payload `05 00`, octet 22 x 100/255). Le RSSI ESP n'est pas
+utilise comme substitut.

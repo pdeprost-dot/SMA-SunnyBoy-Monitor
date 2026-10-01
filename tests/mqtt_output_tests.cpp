@@ -31,6 +31,12 @@ int main() {
         std::strstr(payload, "\"ac_power_w\":0") &&
         std::strstr(payload, "\"ac_voltage_l1_v\":null") &&
         std::strstr(payload, "\"data_valid\":true"), "genuine zero differs from unavailable");
+  check(std::strstr(payload, "\"data_complete\":false") &&
+        std::strstr(payload, "\"acquisition_result\":\"partial\"") &&
+        std::strstr(payload, "\"dc_power_total_w\":null"), "V2 validity and total fields");
+  snapshot.acquisitionComplete = true;
+  check(SbfspotCompat::serialize(snapshot, payload, sizeof(payload), bytes) &&
+        std::strstr(payload, "\"acquisition_result\":\"success\""), "complete acquisition result");
   std::memset(snapshot.inverterName, 'X', sizeof(snapshot.inverterName) - 1);
   snapshot.inverterName[sizeof(snapshot.inverterName) - 1] = 0;
   check(SbfspotCompat::serialize(snapshot, payload, sizeof(payload), bytes), "maximum bounded string");

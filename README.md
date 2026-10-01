@@ -136,6 +136,19 @@ L'ESP est volontairement laissé sans interaction pendant cette observation.
 
 ## Configuration et compilation
 
+Le dashboard Web V2 responsive affiche trois cartes, les totaux disponibles
+et un etat complet/partiel. Il affiche `0` pour une mesure nulle valide et `—`
+pour une mesure indisponible. Le schema MQTT V2 ajoute versions, nom
+d'installation optionnel, temps onduleur/solaires, puissance DC totale,
+timestamps de reveil/sommeil, `data_complete` et `acquisition_result`.
+
+Les tags relais 51 et 311 sont rendus `Closed` et `Open`; `0x00FFFFFD` est
+publie `null`. Le signal SMA Bluetooth exige une transaction L1 distincte et
+reste donc `null` sans substitution par le RSSI ESP.
+
+Validation : sunset avec zero valide PASS, nuit joignable/partielle PASS.
+Le reveil naturel du matin reste **NOT YET TESTED**.
+
 Copier `firmware/SmaBluetoothDiscovery/SmaLocalConfig.example.h` vers
 `SmaLocalConfig.h`, puis renseigner les identifiants locaux. Ce fichier et les
 credentials restent ignorés par Git.

@@ -15,9 +15,11 @@ struct Value {
 
 struct InverterSnapshot {
   bool acquisitionValid = false;
+  bool acquisitionComplete = false;
   uint32_t lastSuccessfulAcquisition = 0;
-  char programVersion[40] = "SMA-SunnyBoy-Monitor 0.x";
-  char plantName[40] = "MyPlant";
+  char schemaVersion[8] = "2";
+  char firmwareVersion[40] = "SMA-SunnyBoy-Monitor 2.0";
+  char plantName[40]{};
   char timestamp[24]{};
   char inverterTime[24]{};
   char sunrise[24]{};

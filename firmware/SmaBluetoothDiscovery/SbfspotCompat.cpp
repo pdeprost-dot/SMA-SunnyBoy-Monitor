@@ -72,7 +72,21 @@ bool serialize(const InverterSnapshot& s, char* output, size_t capacity, size_t&
        if ((state) == ValueState::Valid) { if (!appendEscaped(output, capacity, written, value)) return false; } \
        else if (!append(output, capacity, written, "null")) return false; } while (0)
   if (!append(output, capacity, written, "{")) return false;
-  TEXT_FIELD("timestamp", s.timestamp, "");
+  TEXT_FIELD("schema_version", s.schemaVersion, "");
+  TEXT_FIELD("firmware_version", s.firmwareVersion, ",");
+  if (!append(output, capacity, written, ",\"plant_name\":")) return false;
+  if (s.plantName[0]) { if (!appendEscaped(output, capacity, written, s.plantName)) return false; }
+  else if (!append(output, capacity, written, "null")) return false;
+  TEXT_FIELD("timestamp", s.timestamp, ",");
+  if (!append(output, capacity, written, ",\"inverter_time\":")) return false;
+  if (s.inverterTime[0]) { if (!appendEscaped(output, capacity, written, s.inverterTime)) return false; }
+  else if (!append(output, capacity, written, "null")) return false;
+  if (!append(output, capacity, written, ",\"sunrise\":")) return false;
+  if (s.sunrise[0]) { if (!appendEscaped(output, capacity, written, s.sunrise)) return false; }
+  else if (!append(output, capacity, written, "null")) return false;
+  if (!append(output, capacity, written, ",\"sunset\":")) return false;
+  if (s.sunset[0]) { if (!appendEscaped(output, capacity, written, s.sunset)) return false; }
+  else if (!append(output, capacity, written, "null")) return false;
   if (!append(output, capacity, written, ",\"serial\":%lu", static_cast<unsigned long>(s.inverterSerial))) return false;
   STATE_TEXT_FIELD("name", s.inverterName, s.inverterNameState);
   STATE_TEXT_FIELD("class", s.inverterClass, s.inverterClassState);
@@ -89,13 +103,23 @@ bool serialize(const InverterSnapshot& s, char* output, size_t capacity, size_t&
   SCALED_FIELD("ac_current_l1_a", s.acCurrent1, 1000.0, 3);
   SCALED_FIELD("grid_frequency_hz", s.gridFrequency, 100.0, 2);
   NUM_FIELD("dc_power_w", s.dcPower1);
+  NUM_FIELD("dc_power_total_w", s.dcTotalPower);
   SCALED_FIELD("dc_voltage_v", s.dcVoltage1, 100.0, 2);
   SCALED_FIELD("dc_current_a", s.dcCurrent1, 1000.0, 3);
   SCALED_FIELD("operating_time_h", s.operatingTime, 3600.0, 3);
   SCALED_FIELD("feed_in_time_h", s.feedInTime, 3600.0, 3);
   SCALED_FIELD("bt_signal_percent", s.bluetoothSignal, 1000.0, 3);
-  if (!append(output, capacity, written, ",\"data_valid\":%s}",
-              s.acquisitionValid ? "true" : "false")) return false;
+  if (!append(output, capacity, written, ",\"inverter_wakeup_time\":")) return false;
+  if (s.inverterWakeupTime[0]) { if (!appendEscaped(output, capacity, written, s.inverterWakeupTime)) return false; }
+  else if (!append(output, capacity, written, "null")) return false;
+  if (!append(output, capacity, written, ",\"inverter_sleep_time\":")) return false;
+  if (s.inverterSleepTime[0]) { if (!appendEscaped(output, capacity, written, s.inverterSleepTime)) return false; }
+  else if (!append(output, capacity, written, "null")) return false;
+  if (!append(output, capacity, written,
+              ",\"data_valid\":%s,\"data_complete\":%s,\"acquisition_result\":\"%s\"}",
+              s.acquisitionValid ? "true" : "false",
+              s.acquisitionComplete ? "true" : "false",
+              s.acquisitionComplete ? "success" : (s.acquisitionValid ? "partial" : "none"))) return false;
 #undef TEXT_FIELD
 #undef NUM_FIELD
 #undef SCALED_FIELD

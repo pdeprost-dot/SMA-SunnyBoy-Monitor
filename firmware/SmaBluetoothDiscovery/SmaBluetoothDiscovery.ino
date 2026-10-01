@@ -376,11 +376,15 @@ void refreshInverterSnapshot() {
   for (size_t slot = 0; slot < ProductConfig::kInverterCount; ++slot) {
     SbfspotCompat::InverterSnapshot& snapshot = inverterSnapshots[slot];
     snapshot.inverterSerial = productSettings.inverters[slot].serial;
+    strlcpy(snapshot.plantName, productSettings.plantName, sizeof(snapshot.plantName));
   }
   if (smaClient.phase3Complete() && smaClient.datasetUsable()) {
     SbfspotCompat::InverterSnapshot& snapshot = inverterSnapshots[smaSelectedSlot];
     const auto& values = smaClient.measurements();
     ProductConfig::formatLocalTime(now, snapshot.timestamp, sizeof(snapshot.timestamp));
+    snapshot.inverterTime[0] = 0;
+    snapshot.inverterWakeupTime[0] = 0;
+    snapshot.inverterSleepTime[0] = 0;
     time_t sunrise = 0, sunset = 0;
     if (ProductConfig::calculateSunTimes(now, productSettings.latitude,
                                          productSettings.longitude, sunrise, sunset)) {
@@ -421,10 +425,17 @@ void refreshInverterSnapshot() {
       formatKnownAttribute(values.inverterStatus.raw, "Ok", 307,
                            snapshot.inverterStatus, sizeof(snapshot.inverterStatus));
     snapshot.inverterGridRelayState = snapshotState(values.gridRelay.state);
-    if (values.gridRelay.state == SmaPhase3::FieldState::Valid)
-      formatKnownAttribute(values.gridRelay.raw, "Closed", 51,
-                           snapshot.inverterGridRelay, sizeof(snapshot.inverterGridRelay));
+    if (values.gridRelay.state == SmaPhase3::FieldState::Valid) {
+      if (values.gridRelay.raw == 51)
+        strlcpy(snapshot.inverterGridRelay, "Closed", sizeof(snapshot.inverterGridRelay));
+      else if (values.gridRelay.raw == 311)
+        strlcpy(snapshot.inverterGridRelay, "Open", sizeof(snapshot.inverterGridRelay));
+      else
+        formatAttribute(values.gridRelay.raw, snapshot.inverterGridRelay,
+                        sizeof(snapshot.inverterGridRelay));
+    }
     snapshot.acquisitionValid = true;
+    snapshot.acquisitionComplete = !smaClient.datasetPartial() && smaClient.acPowerValid();
     snapshot.lastSuccessfulAcquisition = currentUnixTime();
     const uint32_t inverterTime = values.todayEnergy.timestamp ? values.todayEnergy.timestamp
                                                                : values.totalEnergy.timestamp;
@@ -445,6 +456,9 @@ void loadProductSettings() {
   productSettings.maintenanceMode = preferences.getBool("maintenance", false);
   String value = preferences.getString("apPass", "");
   if (ProductConfig::validWpaPassword(value.c_str())) strlcpy(productSettings.apPassword, value.c_str(), sizeof(productSettings.apPassword));
+  value = preferences.getString("plantName", "");
+  if (value.length() < sizeof(productSettings.plantName))
+    strlcpy(productSettings.plantName, value.c_str(), sizeof(productSettings.plantName));
   productSettings.latitude = preferences.getDouble("latitude", 0);
   productSettings.longitude = preferences.getDouble("longitude", 0);
   value = preferences.getString("timezone", "CET-1CEST,M3.5.0,M10.5.0/3");
@@ -1803,7 +1817,7 @@ String resultsJson() {
 String statusJson() {
   String json;
   json.reserve(2000);
-  json += F("{\"uptimeMs\":"); json += millis() - bootAt;
+  json += F("{\"firmwareVersion\":\"SMA-SunnyBoy-Monitor 2.0\",\"uptimeMs\":"); json += millis() - bootAt;
   json += F(",\"system\":{\"lastResetReason\":\""); json += resetReasonName(bootResetReason);
   json += F("\",\"lastResetCode\":"); json += static_cast<unsigned>(bootResetReason);
   json += F(",\"previousLifecycleCheckpoint\":\""); json += checkpointName(previousCheckpoint);
@@ -1875,6 +1889,10 @@ String dashboardJson() {
     json += F(",\"enabled\":"); json += cfg.enabled ? F("true") : F("false");
     json += F(",\"serial\":"); json += cfg.serial;
     json += F(",\"dataValid\":"); json += s.acquisitionValid ? F("true") : F("false");
+    json += F(",\"dataComplete\":"); json += s.acquisitionComplete ? F("true") : F("false");
+    json += F(",\"acquisitionResult\":\"");
+    json += s.acquisitionComplete ? F("success") : (s.acquisitionValid ? F("partial") : F("none"));
+    json += '"';
     json += F(",\"consecutiveFailures\":"); json += schedulerConsecutiveFailures[i];
     json += F(",\"lastSuccess\":");
     if (s.lastSuccessfulAcquisition) { char formatted[24]{}; ProductConfig::formatLocalTime(s.lastSuccessfulAcquisition, formatted, sizeof(formatted)); json += '"'; json += formatted; json += '"'; }
@@ -1898,6 +1916,7 @@ String dashboardJson() {
     DASH_VALUE("udc", dcVoltage1, 100.0);
     DASH_VALUE("idc", dcCurrent1, 1000.0);
     DASH_VALUE("pdc", dcPower1, 1.0);
+    DASH_VALUE("pdcTotal", dcTotalPower, 1.0);
     DASH_VALUE("frequency", gridFrequency, 100.0);
     DASH_VALUE("temperature", inverterTemperature, 100.0);
     DASH_VALUE("operationHours", operatingTime, 3600.0);
@@ -1909,6 +1928,9 @@ String dashboardJson() {
     json += F(",\"inverterClass\":"); if (s.inverterClassState == SbfspotCompat::ValueState::Valid) { json += '"'; json += jsonEscape(s.inverterClass); json += '"'; } else json += F("null");
     json += F(",\"inverterType\":"); if (s.inverterTypeState == SbfspotCompat::ValueState::Valid) { json += '"'; json += jsonEscape(s.inverterType); json += '"'; } else json += F("null");
     json += F(",\"softwareVersion\":"); if (s.inverterSoftwareVersionState == SbfspotCompat::ValueState::Valid) { json += '"'; json += jsonEscape(s.inverterSoftwareVersion); json += '"'; } else json += F("null");
+    json += F(",\"inverterTime\":"); if (s.inverterTime[0]) { json += '"'; json += s.inverterTime; json += '"'; } else json += F("null");
+    json += F(",\"wakeupTime\":"); if (s.inverterWakeupTime[0]) { json += '"'; json += s.inverterWakeupTime; json += '"'; } else json += F("null");
+    json += F(",\"sleepTime\":"); if (s.inverterSleepTime[0]) { json += '"'; json += s.inverterSleepTime; json += '"'; } else json += F("null");
     json += '}';
   }
   json += F("],\"scheduler\":{\"state\":\""); json += schedulerStateName(schedulerState);
@@ -1953,6 +1975,7 @@ String dashboardJson() {
 String publicConfigJson() {
   String json(F("{\"latitude\":")); json.reserve(900);
   json += String(productSettings.latitude, 6); json += F(",\"longitude\":"); json += String(productSettings.longitude, 6);
+  json += F(",\"plantName\":\""); json += jsonEscape(productSettings.plantName); json += '"';
   json += F(",\"maintenanceMode\":"); json += productSettings.maintenanceMode ? F("true") : F("false");
   json += F(",\"timezone\":\""); json += jsonEscape(productSettings.timezone);
   json += F("\",\"mqtt\":{\"enabled\":"); json += mqttOutput.config().enabled ? F("true") : F("false");
@@ -2187,9 +2210,15 @@ readP.textContent='Lire les 3 onduleurs';readP.onclick=async()=>{readP.disabled=
 
 const char WIFI_CONFIGURATION_SECTION[] PROGMEM = R"HTML(<section><h2>Wi-Fi</h2><form method="post" action="/api/wifi/config"><label>SSID <input name="ssid" maxlength="32"></label><label>Mot de passe Wi-Fi <input name="password" type="password" maxlength="64"></label><button>Enregistrer et connecter</button></form><p class="muted">La modification Wi-Fi redémarre l'appareil. Le mot de passe n'est jamais relu dans cette page.</p></section>)HTML";
 
+const char PAGE_V2[] PROGMEM = R"HTML(<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SMA SunnyBoy Monitor</title><style>:root{--bg:#eef3f7;--card:#fff;--ink:#17212b;--muted:#64717d}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px system-ui,sans-serif}.wrap{max-width:1180px;margin:auto;padding:18px}header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px}h1{font-size:24px;margin:0}.chips{display:flex;flex-wrap:wrap;gap:7px}.chip,.badge{padding:5px 9px;border-radius:999px;background:#dde7ef;font-size:12px}.ok{background:#dff4ea;color:#087147}.partial{background:#fff0d6;color:#8b5300}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.card,details{background:var(--card);border-radius:14px;box-shadow:0 3px 14px #1b304012;padding:17px}.card h2{font-size:17px;margin:0}.hero{font-size:38px;font-weight:750;margin:14px 0 3px}.sub,.muted{color:var(--muted)}.metrics{display:grid;grid-template-columns:1fr auto;gap:8px 12px;border-top:1px solid #e8edf1;margin-top:15px;padding-top:14px}.metrics b{text-align:right}.meta{margin-top:14px;font-size:12px;color:var(--muted)}.summary{display:flex;gap:24px;margin:14px 0 18px;padding:13px 16px;background:#dfeaf2;border-radius:12px}details{margin-top:14px}summary{cursor:pointer;font-weight:700}fieldset{border:1px solid #dce4ea;border-radius:9px;margin:12px 0}label{display:block;margin:8px 0}input,button{padding:8px;max-width:100%}input:not([type=checkbox]){width:100%}pre{white-space:pre-wrap;max-height:300px;overflow:auto;font-size:12px}@media(max-width:800px){.grid{grid-template-columns:1fr}header{align-items:flex-start;flex-direction:column}.hero{font-size:34px}}</style></head><body><div class="wrap"><header><div><h1>SMA SunnyBoy Monitor</h1><div class="muted" id="version">Chargement...</div></div><div class="chips" id="system"></div></header><div class="summary"><b id="totalP">Puissance totale : —</b><b id="totalE">Energie du jour : —</b></div><main id="cards" class="grid"></main><details><summary>Configuration</summary><form method="post" action="/api/product/config"><fieldset><legend>Basic</legend><label>Nom installation <input name="plantName" maxlength="39"></label><label><input name="maintenanceMode" type="checkbox" value="1"> Maintenance</label><label>Latitude <input name="latitude" type="number" step="0.000001" min="-90" max="90"></label><label>Longitude <input name="longitude" type="number" step="0.000001" min="-180" max="180"></label><label>Fuseau POSIX <input name="timezone" maxlength="63"></label></fieldset><fieldset><legend>Advanced</legend><label>Mot de passe AP <input name="apPassword" type="password" maxlength="63" placeholder="vide = conserver"></label><label>Mot de passe OTA <input name="otaPassword" type="password" maxlength="63" placeholder="vide = conserver"></label><label><input name="mqttEnabled" type="checkbox" value="1"> MQTT actif</label><label>Broker <input name="broker" maxlength="63"></label><label>Port <input name="port" type="number" min="1" max="65535"></label><label>Utilisateur <input name="username" maxlength="39"></label><label>Mot de passe MQTT <input name="mqttPassword" type="password" maxlength="63" placeholder="vide = conserver"></label><label>Prefixe <input name="prefix" maxlength="47"></label><label>Intervalle (s) <input name="interval" type="number" min="10" max="86400"></label></fieldset><div id="invConfig"></div><button>Enregistrer</button></form></details><details><summary>Diagnostics</summary><pre id="status"></pre><pre id="log"></pre></details></div><script>const dash=(v,u,d=2)=>v==null?'—':`${Number(v).toFixed(d)} ${u}`,whole=(v,u)=>v==null?'—':`${v} ${u}`;async function get(u){const r=await fetch(u),t=await r.text();if(!r.ok)throw Error(t);return t?JSON.parse(t):{}}function card(x){const state=x.acquisitionResult==='success'?'Complet':x.acquisitionResult==='partial'?'Partiel / nuit':'Non acquis',cls=x.acquisitionResult==='success'?'ok':x.acquisitionResult==='partial'?'partial':'';return `<article class="card"><div style="display:flex;justify-content:space-between;gap:8px"><h2>${x.name}${x.inverterName?` · ${x.inverterName}`:''}</h2><span class="badge ${cls}">${state}</span></div><div class="hero">${whole(x.pac,'W')}</div><div class="sub">AC total</div><div class="metrics"><span>DC total</span><b>${whole(x.pdcTotal,'W')}</b><span>EToday</span><b>${dash(x.eToday,'kWh',3)}</b><span>ETotal</span><b>${dash(x.eTotal,'kWh',3)}</b><span>AC L1</span><b>${whole(x.pac1,'W')}</b><span>AC tension / courant</span><b>${dash(x.uac,'V')} / ${dash(x.iac,'A',3)}</b><span>Frequence</span><b>${dash(x.frequency,'Hz')}</b><span>DC tension / courant</span><b>${dash(x.udc,'V')} / ${dash(x.idc,'A',3)}</b><span>Temperature</span><b>${dash(x.temperature,'°C')}</b><span>Statut / relais</span><b>${x.status??'—'} / ${x.gridRelay??'—'}</b></div><div class="meta">Derniere acquisition : ${x.lastSuccess??'—'} · ${x.inverterType??'—'} · ${x.softwareVersion??'—'}</div></article>`}async function refresh(){try{const [s,d,l]=await Promise.all([get('/api/status'),get('/api/dashboard'),get('/api/log')]);version.textContent=s.firmwareVersion;system.innerHTML=`<span class="chip ${s.wifi.connected?'ok':''}">WiFi ${s.wifi.connected?'OK':'OFF'}</span><span class="chip ${s.mqtt.mqttConnected?'ok':''}">MQTT ${s.mqtt.mqttConnected?'OK':'OFF'}</span><span class="chip">Scheduler ${d.scheduler.state}</span><span class="chip">Uptime ${Math.floor(s.uptimeMs/3600000)} h</span>`;cards.innerHTML=d.inverters.map(card).join('');const ps=d.inverters.map(x=>x.pac);totalP.textContent=ps.every(x=>x!=null)?`Puissance totale : ${ps.reduce((a,b)=>a+b,0)} W`:'Puissance totale : —';const es=d.inverters.map(x=>x.eToday);totalE.textContent=es.every(x=>x!=null)?`Energie du jour : ${es.reduce((a,b)=>a+b,0).toFixed(3)} kWh`:'Energie du jour : —';status.textContent=JSON.stringify(s,null,2);log.textContent=l.lines.join('\n')}catch(e){system.textContent=e}}invConfig.innerHTML=[1,2,3].map(i=>`<fieldset><legend>INV${i}</legend><label><input name="inv${i}Enabled" type="checkbox" value="1"> Actif</label><label>Numero de serie <input name="inv${i}Serial" type="number" min="1" max="4294967295"></label></fieldset>`).join('');async function loadConfig(){const c=await get('/api/config'),f=document.forms[0];f.plantName.value=c.plantName;f.maintenanceMode.checked=c.maintenanceMode;f.latitude.value=c.latitude;f.longitude.value=c.longitude;f.timezone.value=c.timezone;f.mqttEnabled.checked=c.mqtt.enabled;f.broker.value=c.mqtt.broker;f.port.value=c.mqtt.port;f.username.value=c.mqtt.username;f.prefix.value=c.mqtt.prefix;f.interval.value=c.mqtt.interval;c.inverters.forEach((x,n)=>{const i=n+1;f[`inv${i}Enabled`].checked=x.enabled;f[`inv${i}Serial`].value=x.serial})}loadConfig();refresh();setInterval(refresh,5000);</script></body></html>)HTML";
+
 String renderedPage() {
-  String page(FPSTR(PAGE));
+  String page(FPSTR(PAGE_V2));
   page.reserve(page.length() + strlen_P(WIFI_CONFIGURATION_SECTION) + 320);
+  page.replace("<details><summary>Diagnostics",
+               String(FPSTR(WIFI_CONFIGURATION_SECTION)) + "<details><summary>Diagnostics");
+  return page;
+#if 0
   page.replace("<h2>Onduleurs</h2>",
                "<h2>Onduleurs</h2><div id=\"scheduler\" class=\"muted\"></div>");
   page.replace("<fieldset><legend>NETWORK</legend>",
@@ -2203,6 +2232,7 @@ String renderedPage() {
   page.replace("</form></section><section><h2>Diagnostic",
                String("</form></section>") + FPSTR(WIFI_CONFIGURATION_SECTION) + "<section><h2>Diagnostic");
   return page;
+#endif
 }
 
 void sendJson(const String& value, int status = 200) { server.send(status, "application/json", value); }
@@ -2254,8 +2284,10 @@ void registerRoutes() {
     const String timezone = server.arg("timezone");
     const String apCandidate = server.arg("apPassword");
     const String otaCandidate = server.arg("otaPassword");
+    const String plantName = server.arg("plantName");
     if (!ProductConfig::validLatitude(latitude) || !ProductConfig::validLongitude(longitude) ||
         timezone.isEmpty() || timezone.length() >= sizeof(productSettings.timezone) ||
+        plantName.length() >= sizeof(productSettings.plantName) ||
         (!apCandidate.isEmpty() && !ProductConfig::validWpaPassword(apCandidate.c_str())) ||
         (!otaCandidate.isEmpty() && !ProductConfig::validOtaPassword(otaCandidate.c_str()))) {
       sendJson("{\"error\":\"invalid_product_configuration\"}", 400); return;
@@ -2286,6 +2318,7 @@ void registerRoutes() {
     if (!SbfspotCompat::validateMqttConfig(mqtt)) { sendJson("{\"error\":\"invalid_mqtt_configuration\"}", 400); return; }
     preferences.begin("sma-monitor", false);
     preferences.putDouble("latitude", latitude); preferences.putDouble("longitude", longitude);
+    preferences.putString("plantName", plantName);
     preferences.putBool("maintenance", maintenanceMode);
     preferences.putString("timezone", timezone);
     if (!apCandidate.isEmpty()) preferences.putString("apPass", apCandidate);
@@ -2297,6 +2330,7 @@ void registerRoutes() {
     }
     preferences.end();
     productSettings.maintenanceMode = maintenanceMode;
+    strlcpy(productSettings.plantName, plantName.c_str(), sizeof(productSettings.plantName));
     productSettings.latitude = latitude; productSettings.longitude = longitude;
     strlcpy(productSettings.timezone, timezone.c_str(), sizeof(productSettings.timezone));
     memcpy(productSettings.inverters, slots, sizeof(slots)); setenv("TZ", productSettings.timezone, 1); tzset();

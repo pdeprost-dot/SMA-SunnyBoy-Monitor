@@ -20,6 +20,7 @@ struct InverterSlot {
 
 struct Settings {
   bool maintenanceMode = false;
+  char plantName[40]{};
   char apPassword[64]{};
   char otaPassword[64]{};
   double latitude = 0;

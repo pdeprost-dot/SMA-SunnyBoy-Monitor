@@ -59,14 +59,20 @@ The default prefix is `smaesp`. Publication uses the existing lightweight
 PubSubClient QoS behavior and a retained flag. MQTT failure is non-fatal.
 
 The JSON serializer uses a fixed 1024-byte payload buffer. PubSubClient is
-configured with a 1152-byte packet buffer. No MAC address, credential or raw
+configured with a 1152-byte packet buffer. The validated V2 night payload is
+879 bytes, leaving 145 bytes in the JSON buffer and more than 250 bytes in the
+MQTT packet buffer after topic/header overhead. No MAC address, credential or raw
 diagnostic frame is included.
 
 ## Schema and units
 
 | Field | Unit/source |
 |---|---|
+| `schema_version`, `firmware_version` | Stable schema and firmware identifiers |
+| `plant_name` | Optional local configuration; `null` when unset |
 | `timestamp` | Host local time at successful acquisition, `DD/MM/YYYY HH:MM:SS` |
+| `inverter_time` | EToday record timestamp, falling back to ETotal |
+| `sunrise`, `sunset` | Local calculation from location, date and timezone |
 | `serial` | Configured and identity-validated SMA serial |
 | `name`, `class`, `type`, `sw_version` | SMA identity records |
 | `status`, `grid_relay` | SMA attribute records |
@@ -77,16 +83,32 @@ diagnostic frame is included.
 | `ac_current_l1_a` | A |
 | `grid_frequency_hz` | Hz |
 | `dc_power_w` | W |
+| `dc_power_total_w` | W; DC input 1 on this single-input inverter |
 | `dc_voltage_v` | V |
 | `dc_current_a` | A |
 | `operating_time_h`, `feed_in_time_h` | h |
 | `bt_signal_percent` | SMA network value; `null` until acquired |
 | `data_valid` | Result of the completed acquisition |
+| `data_complete` | Required production fields were returned |
+| `acquisition_result` | `success` or `partial` |
+| `inverter_wakeup_time` | TypeLabel / LRI `0x821E` timestamp |
+| `inverter_sleep_time` | PACTot / LRI `0x263F` timestamp |
 
 Each measurement keeps an internal state: valid, unavailable, or not yet
 acquired. Valid zero is serialized as numeric `0`. Both unavailable states are
 serialized as JSON `null`. A complete acquisition failure does not overwrite
 the last retained valid snapshot.
+
+Attribute tag `51` maps to `Closed`, tag `311` to `Open`, and special attribute
+`0x00FFFFFD` is unavailable (`null`). `bt_signal_percent` stays `null`: SBFspot
+obtains it through a separate SMA L1 control `0x03`, payload `05 00`, with byte
+22 scaled by `100/255`; ESP Bluetooth RSSI is not a compatible substitute.
+
+## Day/night validation
+
+- sunset valid-zero transition: PASS;
+- night protocol-reachable / partial dataset: PASS;
+- morning wake transition: **NOT YET TESTED**.
 
 ## Hardware validation status
 

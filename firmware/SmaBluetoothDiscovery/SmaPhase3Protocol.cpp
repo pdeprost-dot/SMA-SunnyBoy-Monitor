@@ -168,6 +168,7 @@ DecodeResult decodeMeasurementResponse(const uint8_t* l2, size_t length,
         const uint32_t value = read32(l2 + pos + at);
         const uint32_t tag = value & 0x00FFFFFFUL;
         if (tag == 0x00FFFFFEUL) break;
+        if (tag == 0x00FFFFFDUL) { local.state = FieldState::Unavailable; break; }
         if ((value >> 24) == 1) { local.raw = tag; local.state = FieldState::Valid; break; }
       }
     } else if (recordSize == 16) {
