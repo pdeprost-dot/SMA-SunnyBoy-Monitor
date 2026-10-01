@@ -32,12 +32,16 @@ def main() -> None:
             stream.write(json.dumps(record, separators=(",", ":")) + "\n")
 
     def on_connect(client, _userdata, _flags, reason_code, _properties):
-        append("mqtt_connection", {"connected": int(reason_code) == 0, "reason": int(reason_code)})
-        if int(reason_code) == 0:
-            client.subscribe("smaesp/inv+", qos=0)
+        reason = int(getattr(reason_code, "value", reason_code))
+        append("mqtt_connection", {"connected": reason == 0, "reason": reason})
+        if reason == 0:
+            client.subscribe("smaesp/+", qos=0)
 
     def on_disconnect(_client, _userdata, _flags, reason_code, _properties):
-        append("mqtt_connection", {"connected": False, "reason": int(reason_code)})
+        append("mqtt_connection", {
+            "connected": False,
+            "reason": int(getattr(reason_code, "value", reason_code)),
+        })
 
     def on_message(_client, _userdata, message):
         try:
