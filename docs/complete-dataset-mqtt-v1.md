@@ -31,6 +31,21 @@ Bounded diagnostics retain fragment counts, raw L1 byte counts, reconstructed
 Data2+ packet counts and lengths, and the decode result for each query. Raw
 frames are not published over MQTT.
 
+Validated reconstruction sizes:
+
+| Query | L1 fragments | Reconstructed Data2+ |
+|---|---:|---:|
+| PACTot | 1 | 72 bytes |
+| GridFreq | 1 | 72 bytes |
+| DC voltage/current | 2 | 100 bytes |
+| AC power | 2 | 128 bytes |
+| AC voltage/current | 3 | 212 bytes |
+
+The former implementation decoded only the payload of the terminal L1 frame,
+so grouped responses appeared artificially short. The validated accumulator
+fixes this without changing the request ranges. SBFspot is the attributed
+behavioral reference used to confirm reconstruction and record iteration.
+
 ## MQTT topics and delivery
 
 One retained JSON document is published after each successful or partial
@@ -72,3 +87,15 @@ Each measurement keeps an internal state: valid, unavailable, or not yet
 acquired. Valid zero is serialized as numeric `0`. Both unavailable states are
 serialized as JSON `null`. A complete acquisition failure does not overwrite
 the last retained valid snapshot.
+
+## Hardware validation status
+
+- complete AC/DC target dataset: PASS;
+- reconstructed length, FCS and packet ID: PASS;
+- reconstruction overflow: none;
+- autonomous three-inverter scheduler: PASS;
+- bounded retries and network restoration: PASS;
+- retained broker snapshot: PASS (validated example: 533 bytes);
+- Wi-Fi, MQTT and OTA restoration: PASS;
+- heap integrity: PASS;
+- sunset/night transition: **TEST IN PROGRESS — 01/10/2026**.
