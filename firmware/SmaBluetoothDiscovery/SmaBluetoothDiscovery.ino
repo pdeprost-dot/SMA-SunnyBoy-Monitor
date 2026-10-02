@@ -60,18 +60,9 @@ enum class SmaLifecycleState : uint8_t {
   BT_OFF, BT_STARTING, BT_READY, CONNECTING, SESSION, TRANSACTION,
   DISCONNECTING, BT_STOPPING, FAILED, BACKOFF
 };
-enum class BtOnlyTestState : uint8_t {
-  IDLE, MQTT_SETTLE, BEGIN, WAIT_READY, READY_DELAY, RFCOMM_CONNECTING,
-  RFCOMM_HOLD, RFCOMM_DISCONNECT, HOLD, REUSE_WAIT, RFCOMM2_CONNECTING,
-  RFCOMM2_HOLD, RFCOMM2_DISCONNECT, END, COMPLETE, FAILED
-};
 enum class NetworkAuditState : uint8_t {
   IDLE, MQTT_SETTLE, OTA_MDNS_SETTLE, WEB_SETTLE, WIFI_SETTLE, WAIT_BT,
   WAIT_SMA, WAIT_MQTT, RESTART, COMPLETE, FAILED
-};
-enum class CombinedState : uint8_t {
-  IDLE, QUIESCING_NETWORK, ACQUIRING_INV1, ACQUIRING_INV2, ACQUIRING_INV3,
-  RESTORING_NETWORK, COMPLETE, FAILED
 };
 enum class SchedulerState : uint8_t { GRACE, RUNNING, ACQUIRING, MAINTENANCE };
 struct BtResult {
@@ -97,49 +88,6 @@ struct AcquisitionMemory {
   uint32_t restoredInternal = 0;
   uint32_t restoredLargest = 0;
   bool guardPassed = false;
-  bool heapIntegrity = false;
-};
-struct CombinedInverterResult {
-  uint32_t startedAt = 0;
-  uint32_t rfcommOpenAt = 0;
-  uint32_t completedAt = 0;
-  uint32_t durationMs = 0;
-  uint32_t openInternal = 0;
-  uint32_t openLargest = 0;
-  uint32_t afterDisconnectInternal = 0;
-  uint32_t afterDisconnectLargest = 0;
-  uint32_t minimumHeap = 0;
-  uint32_t pactotW = 0;
-  bool identity = false;
-  bool login = false;
-  bool pactotValid = false;
-  bool heapIntegrity = false;
-};
-struct ReconnectReadinessSample {
-  uint32_t offsetMs = 0;
-  uint32_t internalFree = 0;
-  uint32_t largestBlock = 0;
-  bool sppCloseSeen = false;
-  bool connected = false;
-  bool closed = false;
-  bool ready = false;
-  bool heapIntegrity = false;
-};
-struct RfcommDelayResult {
-  uint32_t requestedDelayMs = 0;
-  uint32_t actualDelayMs = 0;
-  uint32_t inv1ConnectAt = 0;
-  uint32_t inv1OpenAt = 0;
-  uint32_t inv1CloseAt = 0;
-  uint32_t afterCloseInternal = 0;
-  uint32_t afterCloseLargest = 0;
-  uint32_t beforeInv2Internal = 0;
-  uint32_t beforeInv2Largest = 0;
-  uint32_t inv2ConnectAt = 0;
-  uint32_t inv2OpenAt = 0;
-  bool inv1Open = false;
-  bool closeReady = false;
-  bool inv2Open = false;
   bool heapIntegrity = false;
 };
 struct SchedulerSlotRecord {
@@ -246,26 +194,8 @@ volatile bool sppInitSeen = false;
 volatile uint32_t sppCloseAt = 0;
 volatile uint32_t sppCloseHandle = 0;
 volatile bool sppCloseSeen = false;
-BtOnlyTestState btOnlyState = BtOnlyTestState::IDLE;
-bool btOnlyDisconnectMqtt = false;
-bool btOnlyRfcomm = false;
-bool btOnlyMqttWasConnected = false;
-bool btOnlyHeapIntegrity = false;
-volatile bool btOnlyConnectDone = false;
-volatile bool btOnlyConnectResult = false;
-volatile UBaseType_t btOnlyConnectStackHwm = 0;
-TaskHandle_t btOnlyConnectTaskHandle = nullptr;
-uint8_t btOnlyTargetSlot = 0;
-bool btReuseDiagnostic = false;
-RfcommDelayResult rfcommDelayResult;
-uint32_t btOnlyStateAt = 0;
-uint8_t btOnlyTimelineStep = 0;
-char btOnlyLastError[40]{};
 NetworkAuditState networkAuditState = NetworkAuditState::IDLE;
 uint32_t networkAuditStateAt = 0;
-bool networkAuditWithBt = false;
-bool networkAuditWifiOff = false;
-bool networkAuditRfcomm = false;
 bool networkAuditSma = false;
 uint32_t networkAuditRestoreStartedAt = 0;
 SmaLifecycleState smaLifecycleState = SmaLifecycleState::BT_OFF;
@@ -273,11 +203,9 @@ constexpr uint32_t SMA_FAILURE_BACKOFF_MS = 60000;
 constexpr uint32_t SCHEDULER_BOOT_GRACE_MS = 60000;
 constexpr uint32_t SCHEDULER_SLOT_SPACING_MS = 120000;
 constexpr uint32_t SMA_DISCONNECT_GUARD_MS = 3000;
-constexpr uint32_t SMA_RECONNECT_DIAGNOSTIC_MS = 10000;
 constexpr uint32_t SMA_DIAGNOSTIC_READY_DELAY_MS = 2000;
-constexpr size_t PREVIOUS_BT_READY_INTERNAL_FREE = 9812;
-constexpr size_t PREVIOUS_BT_READY_INTERNAL_LARGEST = 7156;
-constexpr size_t RFCOMM_DIAGNOSTIC_MIN_GAIN = 2048;
+constexpr size_t RFCOMM_MIN_INTERNAL_FREE = 11860;
+constexpr size_t RFCOMM_MIN_INTERNAL_LARGEST = 9204;
 uint32_t smaLastAttemptAt = 0;
 uint32_t smaLastSuccessAt = 0;
 uint32_t smaNextAttemptAt = 0;
@@ -287,14 +215,6 @@ uint32_t smaSuccessfulTransactions = 0;
 uint32_t smaFailedConnections = 0;
 size_t smaSelectedSlot = 0;
 AcquisitionMemory smaAcquisitionMemory;
-CombinedState combinedState = CombinedState::IDLE;
-CombinedInverterResult combinedResults[ProductConfig::kInverterCount];
-bool combinedAcquisition = false;
-bool combinedActive = false;
-uint32_t combinedDisconnectReturnedAt = 0;
-uint8_t reconnectSampleIndex = 0;
-ReconnectReadinessSample reconnectSamples[8];
-constexpr uint32_t RECONNECT_SAMPLE_OFFSETS_MS[8] = {0, 250, 500, 1000, 2000, 3000, 5000, 10000};
 SchedulerState schedulerState = SchedulerState::GRACE;
 uint32_t schedulerNextSlotAt = 0;
 size_t schedulerNextSlot = 0;
@@ -310,13 +230,6 @@ bool schedulerRetryPending = false;
 uint32_t schedulerRetryAt = 0;
 uint32_t schedulerConsecutiveFailures[ProductConfig::kInverterCount]{};
 SoakStats soakStats;
-uint32_t combinedCycleStartedAt = 0;
-uint32_t combinedWifiOffAt = 0;
-uint32_t combinedBtReadyAt = 0;
-uint32_t combinedBtOffAt = 0;
-uint32_t combinedIpRestoredAt = 0;
-uint32_t combinedWebRestoredAt = 0;
-uint32_t combinedMqttRestoredAt = 0;
 char smaLifecycleLastError[64]{};
 String hostname;
 String apSsid;
@@ -329,9 +242,7 @@ void onSppEvent(esp_spp_cb_event_t event, esp_spp_cb_param_t* parameter);
 void onBtAuthComplete(bool success);
 bool startSmaLifecycle();
 void serviceSmaLifecycle();
-void serviceBtOnlyTest();
 void serviceNetworkAudit();
-bool startBtOnlyTest(bool disconnectMqtt, bool rfcomm);
 void connectSta();
 
 SmaBluetoothClient smaClient(serialBt, smaLogAdapter);
@@ -585,42 +496,6 @@ const char* smaLifecycleStateName(SmaLifecycleState value) {
   return "BT_OFF";
 }
 
-const char* combinedStateName(CombinedState value) {
-  switch (value) {
-    case CombinedState::IDLE: return "IDLE";
-    case CombinedState::QUIESCING_NETWORK: return "QUIESCING_NETWORK";
-    case CombinedState::ACQUIRING_INV1: return "ACQUIRING_INV1";
-    case CombinedState::ACQUIRING_INV2: return "ACQUIRING_INV2";
-    case CombinedState::ACQUIRING_INV3: return "ACQUIRING_INV3";
-    case CombinedState::RESTORING_NETWORK: return "RESTORING_NETWORK";
-    case CombinedState::COMPLETE: return "COMPLETE";
-    case CombinedState::FAILED: return "FAILED";
-  }
-  return "IDLE";
-}
-
-const char* btOnlyStateName(BtOnlyTestState value) {
-  switch (value) {
-    case BtOnlyTestState::IDLE: return "IDLE";
-    case BtOnlyTestState::MQTT_SETTLE: return "MQTT_SETTLE";
-    case BtOnlyTestState::BEGIN: return "BEGIN";
-    case BtOnlyTestState::WAIT_READY: return "WAIT_READY";
-    case BtOnlyTestState::READY_DELAY: return "READY_DELAY";
-    case BtOnlyTestState::RFCOMM_CONNECTING: return "RFCOMM_CONNECTING";
-    case BtOnlyTestState::RFCOMM_HOLD: return "RFCOMM_HOLD";
-    case BtOnlyTestState::RFCOMM_DISCONNECT: return "RFCOMM_DISCONNECT";
-    case BtOnlyTestState::HOLD: return "HOLD";
-    case BtOnlyTestState::REUSE_WAIT: return "REUSE_WAIT";
-    case BtOnlyTestState::RFCOMM2_CONNECTING: return "RFCOMM2_CONNECTING";
-    case BtOnlyTestState::RFCOMM2_HOLD: return "RFCOMM2_HOLD";
-    case BtOnlyTestState::RFCOMM2_DISCONNECT: return "RFCOMM2_DISCONNECT";
-    case BtOnlyTestState::END: return "END";
-    case BtOnlyTestState::COMPLETE: return "COMPLETE";
-    case BtOnlyTestState::FAILED: return "FAILED";
-  }
-  return "UNKNOWN";
-}
-
 void setSmaLifecycleState(SmaLifecycleState next) {
   if (smaLifecycleState == next) return;
   addLog("[SMA-LIFECYCLE] %s -> %s", smaLifecycleStateName(smaLifecycleState),
@@ -680,11 +555,6 @@ void onSppEvent(esp_spp_cb_event_t event, esp_spp_cb_param_t* parameter) {
           heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
       smaAcquisitionMemory.rfcommLargest =
           heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-      if (combinedAcquisition && smaSelectedSlot < ProductConfig::kInverterCount) {
-        combinedResults[smaSelectedSlot].rfcommOpenAt = millis();
-        combinedResults[smaSelectedSlot].openInternal = smaAcquisitionMemory.rfcommInternal;
-        combinedResults[smaSelectedSlot].openLargest = smaAcquisitionMemory.rfcommLargest;
-      }
       addLog("[SPP] open t=%lu status=%d handle=%lu internal=%u internal_largest=%u",
              static_cast<unsigned long>(millis()), parameter->open.status,
              static_cast<unsigned long>(parameter->open.handle),
@@ -744,45 +614,27 @@ void stopBluetoothService() {
 }
 
 void logBtStartResources(const char* stage) {
-  btOnlyHeapIntegrity = heap_caps_check_integrity_all(true);
-  addLog("[BT-ONLY] %s free=%u min=%u largest=%u internal=%u internal_largest=%u dma=%u mqtt=%s wifi=%d loop_hwm=%u integrity=%s",
+  const bool heapIntegrity = heap_caps_check_integrity_all(true);
+  addLog("[BT-MEM] %s free=%u min=%u largest=%u internal=%u internal_largest=%u dma=%u mqtt=%s wifi=%d loop_hwm=%u integrity=%s",
          stage, ESP.getFreeHeap(), ESP.getMinFreeHeap(),
          heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
          heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
          heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
          heap_caps_get_free_size(MALLOC_CAP_DMA), mqttOutput.connected() ? "connected" : "disconnected",
          static_cast<int>(WiFi.status()), static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)),
-         btOnlyHeapIntegrity ? "ok" : "failed");
+         heapIntegrity ? "ok" : "failed");
 }
 
-void logTaskAudit(const char* stage) {
-  TaskStatus_t tasks[32];
-  uint32_t totalRunTime = 0;
-  const UBaseType_t count = uxTaskGetSystemState(tasks, 32, &totalRunTime);
-  addLog("[TASKS] stage=%s count=%u", stage, static_cast<unsigned>(count));
-  for (UBaseType_t i = 0; i < count; ++i) {
-    addLog("[TASK] name=%s prio=%u base=%u core=%d hwm=%u state=%u",
-           tasks[i].pcTaskName, static_cast<unsigned>(tasks[i].uxCurrentPriority),
-           static_cast<unsigned>(tasks[i].uxBasePriority), static_cast<int>(tasks[i].xCoreID),
-           static_cast<unsigned>(tasks[i].usStackHighWaterMark),
-           static_cast<unsigned>(tasks[i].eCurrentState));
-  }
-}
-
-bool startNetworkAudit(bool withBt, bool wifiOff = false, bool rfcomm = false) {
+bool startNetworkWindow() {
   if (networkAuditState != NetworkAuditState::IDLE && networkAuditState != NetworkAuditState::COMPLETE &&
       networkAuditState != NetworkAuditState::FAILED) return false;
   if (bluetoothReady || smaLifecycleState != SmaLifecycleState::BT_OFF) return false;
-  networkAuditWithBt = withBt;
-  networkAuditWifiOff = wifiOff;
-  networkAuditRfcomm = rfcomm;
   networkAuditSma = false;
   logBtStartResources("network_normal");
   mqttOutput.disconnect();
   networkAuditStateAt = millis();
   networkAuditState = NetworkAuditState::MQTT_SETTLE;
-  addLog("[NET-AUDIT] started with_bt=%s wifi_off=%s", withBt ? "true" : "false",
-         wifiOff ? "true" : "false");
+  addLog("[NETWORK] acquisition window started");
   return true;
 }
 
@@ -792,7 +644,7 @@ bool startManagedBtScan() {
   networkAuditScan = true;
   managedScanActive = true;
   scanState = ScanState::PREPARING;
-  if (!startNetworkAudit(true, true, false)) {
+  if (!startNetworkWindow()) {
     networkAuditScan = false;
     managedScanActive = false;
     scanState = ScanState::ERROR;
@@ -816,10 +668,7 @@ bool startSafeSmaAcquisition(size_t slot) {
       heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   const uint32_t beforeLargest =
       heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  if (!startNetworkAudit(true, true, false)) return false;
-  combinedAcquisition = false;
-  combinedActive = false;
-  combinedState = CombinedState::IDLE;
+  if (!startNetworkWindow()) return false;
   smaSelectedSlot = slot;
   smaAcquisitionMemory = {};
   smaAcquisitionMemory.beforeInternal = beforeInternal;
@@ -838,53 +687,10 @@ bool startInverterIdentityTest(size_t slot) {
   if (!ProductConfig::validMac(inverter.mac) ||
       !smaClient.setUserPassword(inverter.userPassword) ||
       !smaClient.setTarget(inverter.mac, inverter.serial)) return false;
-  if (!startNetworkAudit(true, true, false)) return false;
-  combinedAcquisition = false;
-  combinedActive = false;
-  combinedState = CombinedState::IDLE;
+  if (!startNetworkWindow()) return false;
   smaSelectedSlot = slot;
   smaAcquisitionMemory = {};
   networkAuditSma = true;
-  return true;
-}
-
-bool startCombinedSmaAcquisition() {
-  if ((networkAuditState != NetworkAuditState::IDLE &&
-       networkAuditState != NetworkAuditState::COMPLETE &&
-       networkAuditState != NetworkAuditState::FAILED) ||
-      bluetoothReady || smaLifecycleState != SmaLifecycleState::BT_OFF) return false;
-  for (size_t slot = 0; slot < ProductConfig::kInverterCount; ++slot) {
-    const auto& inverter = productSettings.inverters[slot];
-    if (!inverter.enabled || !ProductConfig::validMac(inverter.mac) ||
-        !ProductConfig::validSerial(inverter.serial)) return false;
-  }
-  if (!smaClient.setUserPassword(productSettings.inverters[0].userPassword) ||
-      !smaClient.setTarget(productSettings.inverters[0].mac,
-                           productSettings.inverters[0].serial)) return false;
-  const uint32_t beforeInternal =
-      heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  const uint32_t beforeLargest =
-      heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  if (!startNetworkAudit(true, true, false)) return false;
-  smaSelectedSlot = 0;
-  smaAcquisitionMemory = {};
-  smaAcquisitionMemory.beforeInternal = beforeInternal;
-  smaAcquisitionMemory.beforeLargest = beforeLargest;
-  memset(combinedResults, 0, sizeof(combinedResults));
-  memset(reconnectSamples, 0, sizeof(reconnectSamples));
-  reconnectSampleIndex = 0;
-  combinedDisconnectReturnedAt = 0;
-  sppCloseAt = 0;
-  sppCloseHandle = 0;
-  sppCloseSeen = false;
-  combinedCycleStartedAt = millis();
-  combinedWifiOffAt = combinedBtReadyAt = combinedBtOffAt = 0;
-  combinedIpRestoredAt = combinedWebRestoredAt = combinedMqttRestoredAt = 0;
-  combinedAcquisition = true;
-  combinedActive = true;
-  combinedState = CombinedState::QUIESCING_NETWORK;
-  networkAuditSma = true;
-  addLog("[COMBINED] cycle requested");
   return true;
 }
 
@@ -962,13 +768,10 @@ void serviceScheduler() {
 
   if (productSettings.maintenanceMode) { skipSchedulerSlot(scheduledAt, slot, "SKIP_MAINTENANCE"); return; }
   if (otaBusy) { skipSchedulerSlot(scheduledAt, slot, "SKIP_OTA"); return; }
-  const bool btOnlyBusy = btOnlyState != BtOnlyTestState::IDLE &&
-                          btOnlyState != BtOnlyTestState::COMPLETE &&
-                          btOnlyState != BtOnlyTestState::FAILED;
   const bool networkBusy = networkAuditState != NetworkAuditState::IDLE &&
                            networkAuditState != NetworkAuditState::COMPLETE &&
                            networkAuditState != NetworkAuditState::FAILED;
-  if (networkBusy || btOnlyBusy || bluetoothReady || smaLifecycleState != SmaLifecycleState::BT_OFF) {
+  if (networkBusy || bluetoothReady || smaLifecycleState != SmaLifecycleState::BT_OFF) {
     skipSchedulerSlot(scheduledAt, slot, "SKIP_BUSY"); return;
   }
   if (!productSettings.inverters[slot].enabled) {
@@ -982,8 +785,7 @@ void serviceScheduler() {
   const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   const bool integrity = heap_caps_check_integrity_all(true);
   if (!integrity ||
-      internalFree < PREVIOUS_BT_READY_INTERNAL_FREE + RFCOMM_DIAGNOSTIC_MIN_GAIN ||
-      largest < PREVIOUS_BT_READY_INTERNAL_LARGEST + RFCOMM_DIAGNOSTIC_MIN_GAIN) {
+      internalFree < RFCOMM_MIN_INTERNAL_FREE || largest < RFCOMM_MIN_INTERNAL_LARGEST) {
     if (!integrity) ++soakStats.heapIntegrityFailures;
     skipSchedulerSlot(scheduledAt, slot, "SKIP_MEMORY"); return;
   }
@@ -1020,11 +822,7 @@ void serviceScheduler() {
 void restartNetworkAuditServices() {
   server.begin();
   ArduinoOTA.begin();
-  if (combinedAcquisition) {
-    combinedWebRestoredAt = millis();
-    combinedState = CombinedState::RESTORING_NETWORK;
-  }
-  addLog("[NET-AUDIT] services_restarted web=true ota=true mdns=true");
+  addLog("[NETWORK] services_restarted web=true ota=true mdns=true");
   networkAuditState = NetworkAuditState::WAIT_MQTT;
 }
 
@@ -1042,7 +840,6 @@ void serviceNetworkAudit() {
     case NetworkAuditState::OTA_MDNS_SETTLE:
       if (now - networkAuditStateAt >= 2000) {
         logBtStartResources("network_ota_mdns_off");
-        logTaskAudit("ota_mdns_off");
         server.stop();
         networkAuditStateAt = now;
         networkAuditState = NetworkAuditState::WEB_SETTLE;
@@ -1051,28 +848,15 @@ void serviceNetworkAudit() {
     case NetworkAuditState::WEB_SETTLE:
       if (now - networkAuditStateAt >= 2000) {
         logBtStartResources("network_web_off");
-        if (networkAuditWifiOff) {
-          const bool stopped = WiFi.disconnect(true, false);
-          if (combinedAcquisition) combinedWifiOffAt = millis();
-          addLog("[NET-AUDIT] wifi_stop result=%s", stopped ? "true" : "false");
-          networkAuditStateAt = now;
-          networkAuditState = NetworkAuditState::WIFI_SETTLE;
-        } else if (networkAuditWithBt) {
-          if (!startBtOnlyTest(false, false)) {
-            networkAuditState = NetworkAuditState::FAILED;
-            restartNetworkAuditServices();
-          } else {
-            networkAuditState = NetworkAuditState::WAIT_BT;
-          }
-        } else {
-          restartNetworkAuditServices();
-        }
+        const bool stopped = WiFi.disconnect(true, false);
+        addLog("[NETWORK] wifi_stop result=%s", stopped ? "true" : "false");
+        networkAuditStateAt = now;
+        networkAuditState = NetworkAuditState::WIFI_SETTLE;
       }
       break;
     case NetworkAuditState::WIFI_SETTLE:
       if (now - networkAuditStateAt >= 3000) {
         logBtStartResources("network_wifi_off");
-        logTaskAudit("wifi_off");
         if (networkAuditScan) {
           sppInitSeen = false;
           bluetoothReady = serialBt.begin("SMA-SunnyBoy-Monitor", true, true);
@@ -1097,16 +881,14 @@ void serviceNetworkAudit() {
             connectSta();
             restartNetworkAuditServices();
           }
-        } else if (!startBtOnlyTest(false, networkAuditRfcomm)) {
+        } else {
           networkAuditState = NetworkAuditState::FAILED;
           networkAuditRestoreStartedAt = millis();
           connectSta();
-          addLog("[NET-AUDIT] wifi_ip_restore_ms=%lu connected=%s",
+          addLog("[NETWORK] wifi_ip_restore_ms=%lu connected=%s",
                  static_cast<unsigned long>(millis() - networkAuditRestoreStartedAt),
                  WiFi.status() == WL_CONNECTED ? "true" : "false");
           restartNetworkAuditServices();
-        } else {
-          networkAuditState = NetworkAuditState::WAIT_BT;
         }
       }
       break;
@@ -1117,8 +899,7 @@ void serviceNetworkAudit() {
         const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         const bool integrity = heap_caps_check_integrity_all(true);
         if (bluetoothReady || !integrity ||
-            internalFree < PREVIOUS_BT_READY_INTERNAL_FREE + RFCOMM_DIAGNOSTIC_MIN_GAIN ||
-            largest < PREVIOUS_BT_READY_INTERNAL_LARGEST + RFCOMM_DIAGNOSTIC_MIN_GAIN) {
+            internalFree < RFCOMM_MIN_INTERNAL_FREE || largest < RFCOMM_MIN_INTERNAL_LARGEST) {
           addLog("[SCHED] retry_no_go bt=%s internal=%u largest=%u integrity=%s",
                  bluetoothReady ? "on" : "off", internalFree, largest,
                  integrity ? "ok" : "failed");
@@ -1140,9 +921,7 @@ void serviceNetworkAudit() {
           smaLifecycleState == SmaLifecycleState::BACKOFF) {
         networkAuditRestoreStartedAt = millis();
         connectSta();
-        if (combinedAcquisition && WiFi.status() == WL_CONNECTED)
-          combinedIpRestoredAt = millis();
-        addLog("[NET-AUDIT] wifi_ip_restore_ms=%lu connected=%s",
+        addLog("[NETWORK] wifi_ip_restore_ms=%lu connected=%s",
                static_cast<unsigned long>(millis() - networkAuditRestoreStartedAt),
                WiFi.status() == WL_CONNECTED ? "true" : "false");
         restartNetworkAuditServices();
@@ -1154,33 +933,17 @@ void serviceNetworkAudit() {
         networkAuditRestoreStartedAt = millis();
         connectSta();
         restartNetworkAuditServices();
-      } else if (btOnlyState == BtOnlyTestState::COMPLETE || btOnlyState == BtOnlyTestState::FAILED) {
-        if (networkAuditWifiOff) {
-          networkAuditRestoreStartedAt = millis();
-          connectSta();
-          addLog("[NET-AUDIT] wifi_ip_restore_ms=%lu connected=%s",
-                 static_cast<unsigned long>(millis() - networkAuditRestoreStartedAt),
-                 WiFi.status() == WL_CONNECTED ? "true" : "false");
-        }
-        restartNetworkAuditServices();
       }
       break;
     case NetworkAuditState::WAIT_MQTT:
       if (!mqttOutput.config().enabled || mqttOutput.connected()) {
-        addLog("[NET-AUDIT] mqtt_restore_ms=%lu",
+        addLog("[NETWORK] mqtt_restore_ms=%lu",
                static_cast<unsigned long>(millis() - networkAuditRestoreStartedAt));
         logBtStartResources("network_restored");
         smaAcquisitionMemory.restoredInternal =
             heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         smaAcquisitionMemory.restoredLargest =
             heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (combinedAcquisition) {
-          combinedMqttRestoredAt = millis();
-          mqttOutput.requestPublishAll();
-          combinedState = smaLifecycleLastError[0] ? CombinedState::FAILED : CombinedState::COMPLETE;
-          combinedActive = false;
-          combinedAcquisition = false;
-        }
         if (inverterTestActive) {
           const bool pass = !smaLifecycleLastError[0] && smaClient.datasetUsable() &&
                             smaClient.decodedSerial() == smaClient.expectedSerial();
@@ -1259,251 +1022,16 @@ void serviceNetworkAudit() {
   }
 }
 
-void btOnlyConnectTask(void*) {
-  recordCheckpoint(CrashCheckpoint::RFCOMM_CONNECT_ENTER);
-  addLog("[BT-ONLY] rfcomm_connect_enter t=%lu slot=%u channel=1",
-         static_cast<unsigned long>(millis()), static_cast<unsigned>(btOnlyTargetSlot + 1));
-  uint8_t target[6]{};
-  unsigned octets[6]{};
-  const char* mac = productSettings.inverters[btOnlyTargetSlot].mac;
-  const bool parsed = sscanf(mac, "%02x:%02x:%02x:%02x:%02x:%02x", &octets[0], &octets[1],
-                             &octets[2], &octets[3], &octets[4], &octets[5]) == 6;
-  if (parsed) for (size_t index = 0; index < 6; ++index) target[index] = octets[index];
-  btOnlyConnectResult = parsed && serialBt.connect(target, 1);
-  btOnlyConnectStackHwm = uxTaskGetStackHighWaterMark(nullptr);
-  btOnlyConnectDone = true;
-  btOnlyConnectTaskHandle = nullptr;
-  vTaskDelete(nullptr);
-}
-
-bool startBtOnlyTest(bool disconnectMqtt, bool rfcomm = false) {
-  if (btOnlyState != BtOnlyTestState::IDLE && btOnlyState != BtOnlyTestState::COMPLETE &&
-      btOnlyState != BtOnlyTestState::FAILED) return false;
-  if (smaLifecycleState != SmaLifecycleState::BT_OFF || bluetoothReady) return false;
-  beginDiagnosticAttempt();
-  recordCheckpoint(CrashCheckpoint::BEFORE_BT_BEGIN);
-  btOnlyDisconnectMqtt = disconnectMqtt;
-  btOnlyRfcomm = rfcomm;
-  btOnlyMqttWasConnected = mqttOutput.connected();
-  btOnlyConnectDone = false;
-  btOnlyConnectResult = false;
-  btOnlyConnectStackHwm = 0;
-  btOnlyTargetSlot = 0;
-  btOnlyTimelineStep = 0;
-  btOnlyLastError[0] = 0;
-  sppInitSeen = false;
-  if (disconnectMqtt) {
-    logBtStartResources("normal_mqtt_connected_bt_off");
-    if (!rfcomm) logTaskAudit("bt_off");
-    mqttOutput.disconnect();
-    btOnlyState = BtOnlyTestState::MQTT_SETTLE;
-    btOnlyStateAt = millis();
-    addLog("[BT-ONLY] requested mode=%c mqtt_disconnected=true", rfcomm ? 'C' : 'B');
-  } else {
-    btOnlyState = BtOnlyTestState::BEGIN;
-    addLog("[BT-ONLY] requested mode=A mqtt_connected=%s", mqttOutput.connected() ? "true" : "false");
-  }
-  return true;
-}
-
-void failBtOnlyTest(const char* error) {
-  strlcpy(btOnlyLastError, error, sizeof(btOnlyLastError));
-  if (bluetoothReady) stopBluetoothService();
-  btOnlyState = BtOnlyTestState::FAILED;
-  addLog("[BT-ONLY] failed error=%s", btOnlyLastError);
-}
-
-void serviceBtOnlyTest() {
-  const uint32_t now = millis();
-  switch (btOnlyState) {
-    case BtOnlyTestState::MQTT_SETTLE:
-      if (now - btOnlyStateAt >= 2000) btOnlyState = BtOnlyTestState::BEGIN;
-      break;
-    case BtOnlyTestState::BEGIN:
-      recordCheckpoint(CrashCheckpoint::BEFORE_BT_BEGIN);
-      logBtStartResources("before_begin");
-      recordCheckpoint(CrashCheckpoint::BT_BEGIN_ENTER);
-      bluetoothReady = serialBt.begin("SMA-SunnyBoy-Monitor", true, true);
-      recordCheckpoint(CrashCheckpoint::BT_BEGIN_RETURNED);
-      addLog("[BT-ONLY] begin_returned result=%s", bluetoothReady ? "true" : "false");
-      if (!bluetoothReady) { failBtOnlyTest("bt_begin_false"); break; }
-      logBtStartResources("begin_return");
-      serialBt.setPin("0000", 4);
-      serialBt.onAuthComplete(onBtAuthComplete);
-      serialBt.register_callback(onSppEvent);
-      recordCheckpoint(CrashCheckpoint::AFTER_BT_BEGIN);
-      btOnlyStateAt = now;
-      btOnlyState = BtOnlyTestState::WAIT_READY;
-      break;
-    case BtOnlyTestState::WAIT_READY:
-      if (sppInitSeen || serialBt.isReady(false, 0)) {
-        addLog("[BT-ONLY] spp_ready t=%lu", static_cast<unsigned long>(now));
-        logBtStartResources("spp_init");
-        if (btOnlyRfcomm) {
-          const size_t internalFree = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-          const size_t internalLargest =
-              heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-          const bool materiallyImproved =
-              internalFree >= PREVIOUS_BT_READY_INTERNAL_FREE + RFCOMM_DIAGNOSTIC_MIN_GAIN &&
-              internalLargest >= PREVIOUS_BT_READY_INTERNAL_LARGEST + RFCOMM_DIAGNOSTIC_MIN_GAIN;
-          const bool characterizationMargin = !btReuseDiagnostic ||
-              (internalFree >= 22U * 1024U && internalLargest >= 16U * 1024U);
-          addLog("[BT-ONLY] rfcomm_gate gain_free=%d gain_largest=%d result=%s",
-                 static_cast<int>(internalFree) - static_cast<int>(PREVIOUS_BT_READY_INTERNAL_FREE),
-                 static_cast<int>(internalLargest) - static_cast<int>(PREVIOUS_BT_READY_INTERNAL_LARGEST),
-                 materiallyImproved ? "GO" : "NO_GO");
-          if (!materiallyImproved || !characterizationMargin || !btOnlyHeapIntegrity) {
-            failBtOnlyTest(btOnlyHeapIntegrity ? "rfcomm_memory_no_go" : "heap_integrity_failed");
-            break;
-          }
-        }
-        btOnlyStateAt = now;
-        btOnlyTimelineStep = 0;
-        btOnlyState = btOnlyRfcomm ? BtOnlyTestState::READY_DELAY : BtOnlyTestState::HOLD;
-      } else if (now - btOnlyStateAt >= 10000) failBtOnlyTest("spp_ready_timeout");
-      break;
-    case BtOnlyTestState::READY_DELAY:
-      if (now - btOnlyStateAt >= SMA_DIAGNOSTIC_READY_DELAY_MS) {
-        logBtStartResources("before_rfcomm");
-        if (btReuseDiagnostic) rfcommDelayResult.inv1ConnectAt = now;
-        if (xTaskCreatePinnedToCore(btOnlyConnectTask, "bt-only-connect", 4096, nullptr, 1,
-                                    &btOnlyConnectTaskHandle, 0) != pdPASS) {
-          failBtOnlyTest("connect_task_create_failed");
-          break;
-        }
-        btOnlyStateAt = now;
-        btOnlyState = BtOnlyTestState::RFCOMM_CONNECTING;
-      }
-      break;
-    case BtOnlyTestState::RFCOMM_CONNECTING:
-      if (btOnlyConnectDone) {
-        addLog("[BT-ONLY] rfcomm_connect_return t=%lu result=%s stack_hwm=%u",
-               static_cast<unsigned long>(now), btOnlyConnectResult ? "true" : "false",
-               static_cast<unsigned>(btOnlyConnectStackHwm));
-        logBtStartResources(btOnlyConnectResult ? "rfcomm_open" : "rfcomm_failed");
-        if (btReuseDiagnostic) {
-          rfcommDelayResult.inv1Open = btOnlyConnectResult;
-          if (btOnlyConnectResult) rfcommDelayResult.inv1OpenAt = now;
-        }
-        btOnlyStateAt = now;
-        btOnlyState = btOnlyConnectResult ? BtOnlyTestState::RFCOMM_HOLD : BtOnlyTestState::END;
-      } else if (now - btOnlyStateAt >= 15000) {
-        failBtOnlyTest("rfcomm_task_timeout");
-      }
-      break;
-    case BtOnlyTestState::RFCOMM_HOLD:
-      if (now - btOnlyStateAt >= 250) btOnlyState = BtOnlyTestState::RFCOMM_DISCONNECT;
-      break;
-    case BtOnlyTestState::RFCOMM_DISCONNECT:
-      sppCloseSeen = false;
-      sppCloseAt = 0;
-      addLog("[BT-ONLY] rfcomm_disconnect result=%s",
-             serialBt.disconnect() ? "true" : "false");
-      logBtStartResources("after_rfcomm_disconnect");
-      btOnlyStateAt = now;
-      if (btReuseDiagnostic) {
-        rfcommDelayResult.inv1CloseAt = sppCloseAt;
-        rfcommDelayResult.afterCloseInternal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        rfcommDelayResult.afterCloseLargest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        rfcommDelayResult.closeReady = sppCloseSeen && !serialBt.connected(0) &&
-                                       serialBt.isClosed() && serialBt.isReady(false, 0);
-        rfcommDelayResult.heapIntegrity = heap_caps_check_integrity_all(true);
-        btOnlyState = BtOnlyTestState::REUSE_WAIT;
-      } else {
-        btOnlyState = BtOnlyTestState::HOLD;
-      }
-      break;
-    case BtOnlyTestState::HOLD:
-      if (!btOnlyRfcomm) {
-        static constexpr uint32_t kTimelineMs[] = {250, 500, 1000, 2000, 5000};
-        static constexpr const char* kTimelineNames[] = {"spp_250ms", "spp_500ms", "spp_1000ms",
-                                                         "spp_2000ms", "spp_5000ms"};
-        if (btOnlyTimelineStep < 5 && now - btOnlyStateAt >= kTimelineMs[btOnlyTimelineStep]) {
-          logBtStartResources(kTimelineNames[btOnlyTimelineStep]);
-          if (btOnlyTimelineStep == 3) logTaskAudit("spp_2000ms");
-          ++btOnlyTimelineStep;
-        }
-        if (btOnlyTimelineStep >= 5) btOnlyState = BtOnlyTestState::END;
-      } else if (now - btOnlyStateAt >= 5000) {
-        btOnlyState = BtOnlyTestState::END;
-      }
-      break;
-    case BtOnlyTestState::REUSE_WAIT:
-      if (!rfcommDelayResult.closeReady || !rfcommDelayResult.heapIntegrity) {
-        failBtOnlyTest("reuse_close_not_ready");
-        break;
-      }
-      if (now - rfcommDelayResult.inv1CloseAt >= rfcommDelayResult.requestedDelayMs) {
-        rfcommDelayResult.actualDelayMs = now - rfcommDelayResult.inv1CloseAt;
-        rfcommDelayResult.beforeInv2Internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        rfcommDelayResult.beforeInv2Largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        rfcommDelayResult.heapIntegrity = heap_caps_check_integrity_all(true);
-        if (rfcommDelayResult.beforeInv2Internal < 22U * 1024U ||
-            rfcommDelayResult.beforeInv2Largest < 16U * 1024U || !rfcommDelayResult.heapIntegrity ||
-            !sppCloseSeen || serialBt.connected(0) || !serialBt.isClosed() || !serialBt.isReady(false, 0)) {
-          failBtOnlyTest("reuse_memory_or_state_no_go");
-          break;
-        }
-        btOnlyTargetSlot = 1;
-        btOnlyConnectDone = false;
-        btOnlyConnectResult = false;
-        rfcommDelayResult.inv2ConnectAt = now;
-        if (xTaskCreatePinnedToCore(btOnlyConnectTask, "bt-reuse-connect", 4096, nullptr, 1,
-                                    &btOnlyConnectTaskHandle, 0) != pdPASS) {
-          failBtOnlyTest("reuse_task_create_failed");
-          break;
-        }
-        btOnlyStateAt = now;
-        btOnlyState = BtOnlyTestState::RFCOMM2_CONNECTING;
-      }
-      break;
-    case BtOnlyTestState::RFCOMM2_CONNECTING:
-      if (btOnlyConnectDone) {
-        rfcommDelayResult.inv2Open = btOnlyConnectResult;
-        if (btOnlyConnectResult) rfcommDelayResult.inv2OpenAt = now;
-        addLog("[BT-REUSE] inv2_result=%s connect_ms=%lu", btOnlyConnectResult ? "OPEN" : "FAIL",
-               static_cast<unsigned long>(now - rfcommDelayResult.inv2ConnectAt));
-        btOnlyStateAt = now;
-        btOnlyState = btOnlyConnectResult ? BtOnlyTestState::RFCOMM2_HOLD : BtOnlyTestState::END;
-      } else if (now - btOnlyStateAt >= 15000) {
-        failBtOnlyTest("reuse_rfcomm_task_timeout");
-      }
-      break;
-    case BtOnlyTestState::RFCOMM2_HOLD:
-      if (now - btOnlyStateAt >= 250) btOnlyState = BtOnlyTestState::RFCOMM2_DISCONNECT;
-      break;
-    case BtOnlyTestState::RFCOMM2_DISCONNECT:
-      addLog("[BT-REUSE] inv2_disconnect=%s", serialBt.disconnect() ? "true" : "false");
-      btOnlyState = BtOnlyTestState::END;
-      break;
-    case BtOnlyTestState::END:
-      logBtStartResources("before_end");
-      stopBluetoothService();
-      logBtStartResources("after_end");
-      btOnlyState = BtOnlyTestState::COMPLETE;
-      addLog("[BT-ONLY] complete mode=%c mqtt_was_connected=%s",
-             btOnlyRfcomm ? 'C' : (btOnlyDisconnectMqtt ? 'B' : 'A'),
-             btOnlyMqttWasConnected ? "true" : "false");
-      break;
-    default: break;
-  }
-}
-
 void failSmaLifecycle(const char* error) {
   smaAcquisitionMemory.minimumHeap = ESP.getMinFreeHeap();
   smaAcquisitionMemory.heapIntegrity = heap_caps_check_integrity_all(true);
   recordCheckpoint(CrashCheckpoint::CLEANUP_START);
   strlcpy(smaLifecycleLastError, error && error[0] ? error : "unknown", sizeof(smaLifecycleLastError));
-  if (combinedAcquisition) {
-    combinedState = CombinedState::FAILED;
-    combinedActive = false;
-  }
   ++smaFailedConnections;
   setSmaLifecycleState(SmaLifecycleState::FAILED);
   if (smaClient.state() != SmaBluetoothClient::State::DISCONNECTED) smaClient.requestDisconnect();
   setSmaLifecycleState(SmaLifecycleState::BT_STOPPING);
   stopBluetoothService();
-  if (combinedAcquisition) combinedBtOffAt = millis();
   if (schedulerAcquisitionActive && schedulerAttempt < 2) {
     ++soakStats.secondAttemptsUsed;
     recordSoakEvent(schedulerCurrentSlot, "SECOND_ATTEMPT_USED");
@@ -1525,8 +1053,6 @@ void failSmaLifecycle(const char* error) {
 
 bool startSmaLifecycle() {
   const uint32_t now = millis();
-  if (btOnlyState != BtOnlyTestState::IDLE && btOnlyState != BtOnlyTestState::COMPLETE &&
-      btOnlyState != BtOnlyTestState::FAILED) return false;
   if (!timeSynchronized()) {
     addLog("[TIME] SMA start rejected synchronized=false unix=%lld",
            static_cast<long long>(currentUnixTime()));
@@ -1569,7 +1095,6 @@ void serviceSmaLifecycle() {
             heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         smaAcquisitionMemory.btReadyLargest =
             heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (combinedAcquisition) combinedBtReadyAt = now;
         setSmaLifecycleState(SmaLifecycleState::BT_READY);
       } else if (now - smaLastAttemptAt >= 10000) {
         failSmaLifecycle("bt_ready_timeout");
@@ -1583,8 +1108,8 @@ void serviceSmaLifecycle() {
             heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         const bool integrity = heap_caps_check_integrity_all(true);
         const bool memoryReady =
-            internalFree >= PREVIOUS_BT_READY_INTERNAL_FREE + RFCOMM_DIAGNOSTIC_MIN_GAIN &&
-            internalLargest >= PREVIOUS_BT_READY_INTERNAL_LARGEST + RFCOMM_DIAGNOSTIC_MIN_GAIN;
+            internalFree >= RFCOMM_MIN_INTERNAL_FREE &&
+            internalLargest >= RFCOMM_MIN_INTERNAL_LARGEST;
         addLog("[SMA-MEM] rfcomm_guard slot=%u internal=%u largest=%u integrity=%s result=%s",
                static_cast<unsigned>(smaSelectedSlot + 1), static_cast<unsigned>(internalFree),
                static_cast<unsigned>(internalLargest), integrity ? "ok" : "failed",
@@ -1599,11 +1124,6 @@ void serviceSmaLifecycle() {
              static_cast<unsigned long>(now),
              static_cast<unsigned long>(now - smaBtReadyAt));
       recordCheckpoint(CrashCheckpoint::RFCOMM_CONNECT_ENTER);
-      if (combinedAcquisition) {
-        combinedResults[smaSelectedSlot].startedAt = now;
-        combinedState = static_cast<CombinedState>(
-            static_cast<uint8_t>(CombinedState::ACQUIRING_INV1) + smaSelectedSlot);
-      }
       if (smaClient.requestConnect()) setSmaLifecycleState(SmaLifecycleState::CONNECTING);
       else failSmaLifecycle("connect_request_rejected");
       break;
@@ -1627,109 +1147,21 @@ void serviceSmaLifecycle() {
         smaAcquisitionMemory.heapIntegrity = heap_caps_check_integrity_all(true);
         ++smaSuccessfulTransactions;
         smaLastSuccessAt = now;
-        if (combinedAcquisition) {
-          auto& result = combinedResults[smaSelectedSlot];
-          result.completedAt = now;
-          result.durationMs = now - result.startedAt;
-          result.identity = smaClient.decodedSerial() == smaClient.expectedSerial();
-          result.login = smaClient.loginValid();
-          result.pactotValid = smaClient.acPowerValid();
-          result.pactotW = smaClient.acPowerW();
-          result.minimumHeap = ESP.getMinFreeHeap();
-          result.heapIntegrity = smaAcquisitionMemory.heapIntegrity;
-        }
         recordCheckpoint(CrashCheckpoint::CLEANUP_START);
-        if (combinedAcquisition) {
-          sppCloseSeen = false;
-          sppCloseAt = 0;
-          sppCloseHandle = 0;
-        }
         if (!smaClient.requestDisconnect()) {
           failSmaLifecycle("disconnect_failed");
           break;
         }
-        combinedDisconnectReturnedAt = millis();
-        reconnectSampleIndex = 0;
-        smaStopAt = combinedAcquisition && smaSelectedSlot == 0
-                        ? combinedDisconnectReturnedAt + SMA_RECONNECT_DIAGNOSTIC_MS
-                        : combinedDisconnectReturnedAt + SMA_DISCONNECT_GUARD_MS;
+        smaStopAt = millis() + SMA_DISCONNECT_GUARD_MS;
         setSmaLifecycleState(SmaLifecycleState::DISCONNECTING);
       } else if (smaClient.state() == SmaBluetoothClient::State::ERROR) {
         failSmaLifecycle(smaClient.lastError());
       }
       break;
     case SmaLifecycleState::DISCONNECTING:
-      if (combinedAcquisition && smaSelectedSlot == 0 && combinedDisconnectReturnedAt) {
-        const uint32_t elapsed = now - combinedDisconnectReturnedAt;
-        while (reconnectSampleIndex < 8 &&
-               elapsed >= RECONNECT_SAMPLE_OFFSETS_MS[reconnectSampleIndex]) {
-          auto& sample = reconnectSamples[reconnectSampleIndex];
-          sample.offsetMs = elapsed;
-          sample.internalFree = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-          sample.largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-          sample.sppCloseSeen = sppCloseSeen;
-          sample.connected = serialBt.connected(0);
-          sample.closed = serialBt.isClosed();
-          sample.ready = serialBt.isReady(false, 0);
-          sample.heapIntegrity = heap_caps_check_integrity_all(true);
-          addLog("[REUSE] target=%lu actual=%lu close=%s conn=%s closed=%s ready=%s free=%u largest=%u integrity=%s",
-                 static_cast<unsigned long>(RECONNECT_SAMPLE_OFFSETS_MS[reconnectSampleIndex]),
-                 static_cast<unsigned long>(elapsed), sample.sppCloseSeen ? "yes" : "no",
-                 sample.connected ? "yes" : "no", sample.closed ? "yes" : "no",
-                 sample.ready ? "yes" : "no", sample.internalFree, sample.largestBlock,
-                 sample.heapIntegrity ? "ok" : "failed");
-          ++reconnectSampleIndex;
-        }
-      }
       if (static_cast<int32_t>(now - smaStopAt) >= 0) {
-        if (combinedAcquisition) {
-          auto& result = combinedResults[smaSelectedSlot];
-          result.afterDisconnectInternal =
-              heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-          result.afterDisconnectLargest =
-              heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-          const bool integrity = heap_caps_check_integrity_all(true);
-          const bool btUsable = serialBt.isReady(false, 0);
-          const bool memoryReady =
-              result.afterDisconnectInternal >= PREVIOUS_BT_READY_INTERNAL_FREE + RFCOMM_DIAGNOSTIC_MIN_GAIN &&
-              result.afterDisconnectLargest >= PREVIOUS_BT_READY_INTERNAL_LARGEST + RFCOMM_DIAGNOSTIC_MIN_GAIN;
-          addLog("[COMBINED] inter_guard slot=%u internal=%u largest=%u bt_ready=%s integrity=%s result=%s",
-                 static_cast<unsigned>(smaSelectedSlot + 1), result.afterDisconnectInternal,
-                 result.afterDisconnectLargest, btUsable ? "true" : "false",
-                 integrity ? "ok" : "failed", btUsable && integrity && memoryReady ? "GO" : "NO_GO");
-          if (smaSelectedSlot == 0) {
-            const bool rfcommReusable = sppCloseSeen && !serialBt.connected(0) &&
-                                        serialBt.isClosed() && btUsable;
-            addLog("[REUSE] criterion close_at=%lu handle=%lu reusable=%s",
-                   static_cast<unsigned long>(sppCloseAt),
-                   static_cast<unsigned long>(sppCloseHandle), rfcommReusable ? "yes" : "no");
-            if (!rfcommReusable || !integrity || !memoryReady) {
-              failSmaLifecycle(!integrity ? "inter_inverter_heap_failed" : "inter_inverter_bt_not_ready");
-              break;
-            }
-            const size_t nextSlot = smaSelectedSlot + 1;
-            const auto& target = productSettings.inverters[nextSlot];
-            if (!smaClient.setUserPassword(target.userPassword) ||
-                !smaClient.setTarget(target.mac, target.serial)) {
-              failSmaLifecycle("inter_inverter_target_failed");
-              break;
-            }
-            smaSelectedSlot = nextSlot;
-            combinedResults[smaSelectedSlot].startedAt = now;
-            combinedState = static_cast<CombinedState>(
-                static_cast<uint8_t>(CombinedState::ACQUIRING_INV1) + smaSelectedSlot);
-            recordCheckpoint(CrashCheckpoint::RFCOMM_CONNECT_ENTER);
-            if (!smaClient.requestConnect()) {
-              failSmaLifecycle("inter_inverter_connect_rejected");
-              break;
-            }
-            setSmaLifecycleState(SmaLifecycleState::CONNECTING);
-            break;
-          }
-        }
         setSmaLifecycleState(SmaLifecycleState::BT_STOPPING);
         stopBluetoothService();
-        if (combinedAcquisition) combinedBtOffAt = millis();
         setSmaLifecycleState(SmaLifecycleState::BT_OFF);
       }
       break;
@@ -1975,28 +1407,6 @@ String statusJson() {
   json += F(",\"publishFailures\":"); json += mqttOutput.publishFailures();
   json += F(",\"lastPublishMs\":"); json += mqttOutput.lastPublishMs();
   json += F(",\"lastPayloadBytes\":"); json += static_cast<unsigned>(mqttOutput.lastPayloadBytes());
-  json += F("},\"btOnlyTest\":{\"state\":\""); json += btOnlyStateName(btOnlyState);
-  json += F("\",\"mode\":\""); json += btOnlyRfcomm ? "C" : (btOnlyDisconnectMqtt ? "B" : "A");
-  json += F("\",\"sppInitSeen\":"); json += sppInitSeen ? F("true") : F("false");
-  json += F(",\"heapIntegrity\":"); json += btOnlyHeapIntegrity ? F("true") : F("false");
-  json += F(",\"lastError\":\""); json += jsonEscape(btOnlyLastError); json += '"';
-  json += F(",\"reuseDiagnostic\":"); json += btReuseDiagnostic ? F("true") : F("false");
-  json += F(",\"reuseResult\":{\"requestedDelayMs\":"); json += rfcommDelayResult.requestedDelayMs;
-  json += F(",\"actualDelayMs\":"); json += rfcommDelayResult.actualDelayMs;
-  json += F(",\"inv1ConnectAt\":"); json += rfcommDelayResult.inv1ConnectAt;
-  json += F(",\"inv1OpenAt\":"); json += rfcommDelayResult.inv1OpenAt;
-  json += F(",\"inv1CloseAt\":"); json += rfcommDelayResult.inv1CloseAt;
-  json += F(",\"afterCloseInternal\":"); json += rfcommDelayResult.afterCloseInternal;
-  json += F(",\"afterCloseLargest\":"); json += rfcommDelayResult.afterCloseLargest;
-  json += F(",\"beforeInv2Internal\":"); json += rfcommDelayResult.beforeInv2Internal;
-  json += F(",\"beforeInv2Largest\":"); json += rfcommDelayResult.beforeInv2Largest;
-  json += F(",\"inv2ConnectAt\":"); json += rfcommDelayResult.inv2ConnectAt;
-  json += F(",\"inv2OpenAt\":"); json += rfcommDelayResult.inv2OpenAt;
-  json += F(",\"inv1Open\":"); json += rfcommDelayResult.inv1Open ? F("true") : F("false");
-  json += F(",\"closeReady\":"); json += rfcommDelayResult.closeReady ? F("true") : F("false");
-  json += F(",\"inv2Open\":"); json += rfcommDelayResult.inv2Open ? F("true") : F("false");
-  json += F(",\"heapIntegrity\":"); json += rfcommDelayResult.heapIntegrity ? F("true") : F("false");
-  json += '}';
   const time_t now = currentUnixTime();
   char localTime[24]{}, offset[8]{};
   tm local{};
@@ -2287,56 +1697,6 @@ String smaStatusJson() {
   json += F(",\"guardPassed\":"); json += smaAcquisitionMemory.guardPassed ? F("true") : F("false");
   json += F(",\"heapIntegrity\":"); json += smaAcquisitionMemory.heapIntegrity ? F("true") : F("false");
   json += '}';
-  json += F(",\"combined\":{\"active\":"); json += combinedActive ? F("true") : F("false");
-  json += F(",\"state\":\""); json += combinedStateName(combinedState); json += '"';
-  json += F(",\"cycleStartedAt\":"); json += combinedCycleStartedAt;
-  json += F(",\"wifiOffAt\":"); json += combinedWifiOffAt;
-  json += F(",\"btReadyAt\":"); json += combinedBtReadyAt;
-  json += F(",\"btOffAt\":"); json += combinedBtOffAt;
-  json += F(",\"ipRestoredAt\":"); json += combinedIpRestoredAt;
-  json += F(",\"webRestoredAt\":"); json += combinedWebRestoredAt;
-  json += F(",\"mqttRestoredAt\":"); json += combinedMqttRestoredAt;
-  json += F(",\"disconnectReturnedAt\":"); json += combinedDisconnectReturnedAt;
-  json += F(",\"sppCloseAt\":"); json += static_cast<uint32_t>(sppCloseAt);
-  json += F(",\"sppCloseHandle\":"); json += static_cast<uint32_t>(sppCloseHandle);
-  json += F(",\"readinessSamples\":[");
-  for (size_t index = 0; index < 8; ++index) {
-    if (index) json += ',';
-    const auto& sample = reconnectSamples[index];
-    json += F("{\"targetMs\":"); json += RECONNECT_SAMPLE_OFFSETS_MS[index];
-    json += F(",\"actualMs\":"); json += sample.offsetMs;
-    json += F(",\"internalFree\":"); json += sample.internalFree;
-    json += F(",\"largestBlock\":"); json += sample.largestBlock;
-    json += F(",\"sppCloseSeen\":"); json += sample.sppCloseSeen ? F("true") : F("false");
-    json += F(",\"connected\":"); json += sample.connected ? F("true") : F("false");
-    json += F(",\"closed\":"); json += sample.closed ? F("true") : F("false");
-    json += F(",\"ready\":"); json += sample.ready ? F("true") : F("false");
-    json += F(",\"heapIntegrity\":"); json += sample.heapIntegrity ? F("true") : F("false");
-    json += '}';
-  }
-  json += ']';
-  json += F(",\"inverters\":[");
-  for (size_t slot = 0; slot < ProductConfig::kInverterCount; ++slot) {
-    if (slot) json += ',';
-    const auto& result = combinedResults[slot];
-    json += F("{\"slot\":"); json += static_cast<unsigned>(slot + 1);
-    json += F(",\"startedAt\":"); json += result.startedAt;
-    json += F(",\"rfcommOpenAt\":"); json += result.rfcommOpenAt;
-    json += F(",\"completedAt\":"); json += result.completedAt;
-    json += F(",\"durationMs\":"); json += result.durationMs;
-    json += F(",\"openInternal\":"); json += result.openInternal;
-    json += F(",\"openLargest\":"); json += result.openLargest;
-    json += F(",\"afterDisconnectInternal\":"); json += result.afterDisconnectInternal;
-    json += F(",\"afterDisconnectLargest\":"); json += result.afterDisconnectLargest;
-    json += F(",\"minimumHeap\":"); json += result.minimumHeap;
-    json += F(",\"acPowerW\":"); json += result.pactotW;
-    json += F(",\"identityValid\":"); json += result.identity ? F("true") : F("false");
-    json += F(",\"loginValid\":"); json += result.login ? F("true") : F("false");
-    json += F(",\"acPowerValid\":"); json += result.pactotValid ? F("true") : F("false");
-    json += F(",\"heapIntegrity\":"); json += result.heapIntegrity ? F("true") : F("false");
-    json += '}';
-  }
-  json += F("]}");
   json += F(",\"connectTaskStackHighWater\":"); json += static_cast<unsigned>(smaClient.connectTaskStackHighWater());
   json += F(",\"loopTaskStackHighWater\":"); json += static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr));
   json += F(",\"lastValidResponseAgeMs\":");
@@ -2672,39 +2032,6 @@ void registerRoutes() {
     String response(F("{\"accepted\":true,\"state\":\"NETWORK_QUIESCE\",\"slot\":"));
     response += static_cast<unsigned>(slot + 1); response += '}'; sendJson(response, 202);
   });
-  server.on("/api/sma/connect-all", HTTP_POST, [] {
-    noteHttpRequest("sma_connect_all");
-    if (scanState == ScanState::SCANNING) {
-      sendJson("{\"error\":\"bt_scan_in_progress\"}", 409); return;
-    }
-    if (!timeSynchronized()) {
-      sendJson("{\"error\":\"time_not_synchronized\"}", 503); return;
-    }
-    if (!startCombinedSmaAcquisition()) {
-      sendJson("{\"error\":\"combined_acquisition_busy_or_invalid\"}", 409); return;
-    }
-    sendJson("{\"accepted\":true,\"state\":\"QUIESCING_NETWORK\"}", 202);
-  });
-  server.on("/api/bt/reuse-test", HTTP_POST, [] {
-    const uint32_t delayMs = static_cast<uint32_t>(server.arg("delay").toInt());
-    if (delayMs != 500 && delayMs != 1000 && delayMs != 2000 &&
-        delayMs != 3000 && delayMs != 5000) {
-      sendJson("{\"error\":\"invalid_delay\"}", 400); return;
-    }
-    if (!ProductConfig::validMac(productSettings.inverters[0].mac) ||
-        !ProductConfig::validMac(productSettings.inverters[1].mac)) {
-      sendJson("{\"error\":\"invalid_target\"}", 409); return;
-    }
-    rfcommDelayResult = {};
-    rfcommDelayResult.requestedDelayMs = delayMs;
-    btReuseDiagnostic = true;
-    if (!startNetworkAudit(true, true, true)) {
-      btReuseDiagnostic = false;
-      sendJson("{\"error\":\"diagnostic_busy\"}", 409); return;
-    }
-    String response(F("{\"accepted\":true,\"delayMs\":"));
-    response += delayMs; response += '}'; sendJson(response, 202);
-  });
   server.on("/api/bt/scan", HTTP_POST, [] {
     if (!requireWebConfigAuthentication()) return;
     noteHttpRequest("scan");
@@ -2954,20 +2281,17 @@ void loop() {
   lastLoopAt = now;
   server.handleClient();
   smaClient.tick();
-  serviceBtOnlyTest();
   serviceNetworkAudit();
   serviceSmaLifecycle();
   serviceScheduler();
   serviceBtScan();
   if (scanState != ScanState::SCANNING) ArduinoOTA.handle();
   refreshInverterSnapshot();
-  const bool btOnlySuppressMqtt = btOnlyDisconnectMqtt && btOnlyState != BtOnlyTestState::IDLE &&
-                                  btOnlyState != BtOnlyTestState::COMPLETE && btOnlyState != BtOnlyTestState::FAILED;
   const bool networkAuditSuppressMqtt = networkAuditState != NetworkAuditState::IDLE &&
                                         networkAuditState != NetworkAuditState::COMPLETE &&
                                         networkAuditState != NetworkAuditState::FAILED &&
                                         networkAuditState != NetworkAuditState::WAIT_MQTT;
-  const bool suppressMqtt = btOnlySuppressMqtt || networkAuditSuppressMqtt;
+  const bool suppressMqtt = networkAuditSuppressMqtt;
   mqttOutput.tick(WiFi.status() == WL_CONNECTED && !suppressMqtt, otaBusy, inverterSnapshots);
   const wl_status_t wifiStatus = WiFi.status();
   if (wifiStatus != lastWifiStatus) {
@@ -2975,7 +2299,7 @@ void loop() {
            static_cast<int>(wifiStatus), scanStateName(scanState));
     lastWifiStatus = wifiStatus;
   }
-  const bool networkAuditOwnsWifi = networkAuditWifiOff && networkAuditState != NetworkAuditState::IDLE &&
+  const bool networkAuditOwnsWifi = networkAuditState != NetworkAuditState::IDLE &&
                                     networkAuditState != NetworkAuditState::COMPLETE &&
                                     networkAuditState != NetworkAuditState::FAILED &&
                                     networkAuditState != NetworkAuditState::WAIT_MQTT;
