@@ -1,4 +1,7 @@
-# Configuration and Web UI V3
+# Configuration and Web UI V3 (historique de conception)
+
+Le guide utilisateur courant est [`CONFIGURATION.md`](CONFIGURATION.md). Ce
+document conserve les décisions de conception V3.
 
 The firmware is installable without recompilation after the initial generic
 flash. Installation values are stored in the ESP32 `Preferences` NVS namespace

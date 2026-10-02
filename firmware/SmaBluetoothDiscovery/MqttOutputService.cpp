@@ -14,7 +14,7 @@ MqttOutputService::MqttOutputService() : mqtt_(network_) {}
 void MqttOutputService::load(Preferences& preferences) {
   preferences.begin("sma-monitor", true);
   config_.enabled = preferences.getBool("mqttEn", false);
-  copyPreference(preferences, "mqttHost", "192.168.50.200", config_.broker, sizeof(config_.broker));
+  copyPreference(preferences, "mqttHost", "", config_.broker, sizeof(config_.broker));
   config_.port = preferences.getUShort("mqttPort", 1883);
   copyPreference(preferences, "mqttUser", "", config_.username, sizeof(config_.username));
   copyPreference(preferences, "mqttPass", "", config_.password, sizeof(config_.password));

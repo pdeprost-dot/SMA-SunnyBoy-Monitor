@@ -1,4 +1,8 @@
-# Complete SMA dataset and MQTT snapshot V1
+# Complete SMA dataset and MQTT snapshot V1 (historique de validation)
+
+Le contrat utilisateur courant est décrit dans [`MQTT.md`](MQTT.md). Les états
+de validation « en cours » plus bas datent du jalon initial ; les transitions
+nuit→matin et production matinale sont désormais validées.
 
 ## Validated acquisition
 

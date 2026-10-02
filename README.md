@@ -1,175 +1,92 @@
 # SMA SunnyBoy Monitor
 
-Firmware ESP32 pour lire trois onduleurs SMA Sunny Boy SB 2500HF-30 en
-Bluetooth Classic et publier un snapshot MQTT retenu par onduleur.
+Firmware autonome pour ESP32 classique qui interroge jusqu'à trois onduleurs
+SMA Sunny Boy par Bluetooth Classic, affiche les mesures dans une interface Web
+et publie un snapshot MQTT retenu par onduleur.
 
-**État validé : COMPLETE DATASET + MQTT SNAPSHOT V1**
+Version candidate actuelle : **1.0.0-rc.1**. Aucune licence globale n'est
+encore attribuée au dépôt ; la provenance du protocole est documentée dans
+[`docs/PROTOCOL_PROVENANCE.md`](docs/PROTOCOL_PROVENANCE.md).
 
-Jalon matériel : `c52523f` — 1 octobre 2026.
+## Fonctions
 
-Le projet est encore un firmware autonome de validation. Son intégration dans
-ProgHard Link et une éventuelle interface M5Stack Core2 ne sont pas réalisées.
+- découverte Bluetooth Classic, affectation et test d'identité des onduleurs ;
+- configuration persistante NVS par interface Web ;
+- scheduler trois onduleurs, deux tentatives maximum et aucun rattrapage ;
+- acquisition SMA Data2+ : identité, état, énergie, mesures AC/DC, température
+  et compteurs horaires ;
+- snapshots MQTT QoS 0 retenus, avec distinction entre zéro réel et donnée
+  indisponible ;
+- mise à jour par ArduinoOTA et navigateur ;
+- mode maintenance et diagnostics bornés.
 
-## Matériel validé
+L'ESP32 coupe temporairement Wi-Fi et les services réseau pendant chaque cycle
+Bluetooth afin de préserver la mémoire interne requise par RFCOMM. Les services
+sont restaurés avant la publication MQTT.
+
+## Matériel supporté
+
+Validé sur :
 
 - ESP32-WROOM-32 / ESP32 classique avec Bluetooth BR/EDR ;
-- trois SMA Sunny Boy SB 2500HF-30 ;
+- trois SMA Sunny Boy SB 2500HF-30 réels ;
 - Arduino-ESP32 3.3.11 ;
-- cible `esp32:esp32:esp32`, partition `min_spiffs` ;
-- Wi-Fi pour Web, MQTT et OTA.
+- partition `min_spiffs`.
 
-Les ESP32-C3, C6, S2 et S3 ne conviennent pas à ce firmware Bluetooth Classic.
+ESP32-C3, C6, S2 et S3 ne fournissent pas le Bluetooth Classic requis. Les
+autres familles SMA ne sont pas déclarées compatibles sans validation réelle.
+PZEM et ProgHard Link ne font pas partie de cette release candidate.
 
-## Architecture
+## État de validation
+
+- scan/affectation/test Bluetooth : **PASS** ;
+- acquisition des trois SB 2500HF-30 : **PASS** ;
+- Web et configuration persistante : **PASS** ;
+- MQTT retenu : **PASS** ;
+- ArduinoOTA et OTA navigateur : **PASS** ;
+- stabilité nocturne : **PASS** ;
+- transition nuit → matin : **PASS** ;
+- transition vers la production matinale : **PASS** ;
+- récupération réelle par point d'accès de secours : **EN ATTENTE**.
+
+## Installation rapide
+
+Voir [`docs/INSTALLATION.md`](docs/INSTALLATION.md) pour l'environnement exact,
+le build propre et le flash USB. Après le premier démarrage, configurer Wi-Fi,
+les trois onduleurs, MQTT, la localisation et les secrets depuis le Web.
+
+Documentation :
+
+- [configuration](docs/CONFIGURATION.md) ;
+- [MQTT](docs/MQTT.md) ;
+- [OTA et rollback](docs/OTA.md) ;
+- [sécurité](SECURITY.md) ;
+- [validation matérielle](docs/HARDWARE_VALIDATION.md) ;
+- [provenance du protocole](docs/PROTOCOL_PROVENANCE.md) ;
+- [documents historiques](docs/history/).
+
+## Architecture mémoire
+
+Chaque slot utilise un cycle indépendant :
 
 ```text
-SMA Sunny Boy (x3)
-        |
- Bluetooth Classic / RFCOMM / SMA Data2+
-        |
- ESP32-WROOM-32
-        |
-      Wi-Fi
-   +----+----+
-   |    |    |
-  Web  MQTT  OTA
+réseau OFF → Bluetooth begin → RFCOMM → session/login/requêtes SMA
+→ RFCOMM close → Bluetooth end → réseau ON → publication MQTT
 ```
 
-La marge mémoire interne de l'ESP32 classique ne permet pas de maintenir tous
-les services réseau et Bluetooth Classic avec une marge RFCOMM sûre. Chaque
-acquisition utilise donc une fenêtre bornée :
+Une acquisition échouée conserve le dernier snapshot valide. Elle ne fabrique
+ni zéro ni valeur indisponible et n'augmente pas automatiquement le nombre de
+tentatives.
 
-1. arrêt propre de MQTT, OTA, mDNS, Web et Wi-Fi ;
-2. démarrage de Bluetooth Classic ;
-3. connexion RFCOMM, session SMA et login USER ;
-4. lecture du dataset d'un seul onduleur ;
-5. fermeture RFCOMM et `BluetoothSerial.end()` ;
-6. restauration Wi-Fi, Web, mDNS, OTA et MQTT ;
-7. publication MQTT après restauration réseau.
+## Limites et sécurité
 
-Chaque onduleur utilise un cycle Bluetooth indépendant. Le scheduler décale
-les trois slots et autorise au maximum deux tentatives par slot, chacune avec
-une pile Bluetooth fraîche. Il n'existe ni troisième essai, ni rattrapage
-immédiat, ni dette d'acquisition. Un échec conserve le dernier snapshot valide.
-OTA est prioritaire et le mode maintenance suspend les acquisitions.
+- interface Web en HTTP Basic sans TLS : utilisation sur LAN de confiance ;
+- secrets stockés en NVS et visibles dans l'interface authentifiée ;
+- même secret administrateur pour Web, ArduinoOTA et OTA navigateur ;
+- firmware OTA non signé cryptographiquement ;
+- signal Bluetooth SMA non acquis : `bt_signal_percent` reste `null` ;
+- point d'accès de secours encore à valider sur matériel réel.
 
-## Reconstruction SMA L1 vers Data2+
-
-Les réponses groupées peuvent couvrir plusieurs fragments Bluetooth L1. Le
-firmware détecte le début Data2+, accumule les fragments dans un buffer fixe de
-384 octets, conserve l'état d'échappement `0x7D`, puis décode uniquement après
-la commande L1 terminale `0x0001`.
-
-| Requête validée | Fragments L1 | Data2+ reconstruit |
-|---|---:|---:|
-| PACTot | 1 | 72 octets |
-| GridFreq | 1 | 72 octets |
-| DC U/I | 2 | 100 octets |
-| AC power | 2 | 128 octets |
-| AC U/I | 3 | 212 octets |
-
-La longueur utile, le FCS et le packet ID sont contrôlés avant décodage. Les
-overflows et échappements incomplets sont fatals. IAC1 accepte les deux LRIs
-SMA observés, `0x4650` et `0x4653`.
-
-## Données validées
-
-- identité : série, nom, classe, type et version logicielle ;
-- état : statut, relais réseau et température ;
-- énergie : ETotal et EToday en kWh ;
-- AC : PACTot, PAC1, UAC1, IAC1 et fréquence réseau ;
-- DC : PDC1, UDC1 et IDC1 ;
-- compteurs : temps de fonctionnement et temps d'injection en heures.
-
-Le pourcentage de signal Bluetooth SMA reste optionnel et non validé. Il est
-publié à `null` tant qu'il n'est pas acquis de manière fiable.
-
-## MQTT Snapshot V1
-
-Topics QoS 0 et retenus : `smaesp/inv1`, `smaesp/inv2`, `smaesp/inv3`.
-La publication intervient après le retour réseau. Un échec MQTT ne remet pas en
-cause l'acquisition SMA.
-
-```json
-{
-  "timestamp": "01/10/2026 18:09:31",
-  "serial": 1000000001,
-  "name": "Sunny Boy",
-  "class": "Solar Inverters",
-  "type": "SB 2500HF-30",
-  "sw_version": "02.10.18.R",
-  "status": "Ok",
-  "grid_relay": "Closed",
-  "temperature_c": 37.17,
-  "energy_total_kwh": 32723.654,
-  "energy_today_kwh": 5.578,
-  "ac_power_w": 42,
-  "ac_power_l1_w": 41,
-  "ac_voltage_l1_v": 238.61,
-  "ac_current_l1_a": 0.172,
-  "grid_frequency_hz": 49.96,
-  "dc_power_w": 92,
-  "dc_voltage_v": 356.41,
-  "dc_current_a": 0.261,
-  "operating_time_h": 62426.541,
-  "feed_in_time_h": 59032.349,
-  "bt_signal_percent": null,
-  "data_valid": true
-}
-```
-
-Un zéro SMA valide reste `0`. `UNAVAILABLE` et `NOT_YET_ACQUIRED` restent
-distincts en mémoire mais deviennent `null` dans le JSON. Une acquisition
-échouée ne remplace jamais le dernier snapshot valide. Le payload validé mesure
-533 octets ; les buffers fixes JSON et MQTT mesurent 1024 et 1152 octets.
-
-## Validation actuelle
-
-- dataset AC/DC complet, reconstruction multi-fragments, FCS et packet ID : PASS ;
-- scheduler multi-onduleurs et retries bornés : PASS ;
-- restauration Wi-Fi/Web/MQTT/OTA : PASS ;
-- snapshot MQTT retenu reçu depuis le broker : PASS ;
-- intégrité heap : PASS ;
-- **SUNSET / NIGHT TRANSITION: TEST IN PROGRESS — 01/10/2026**.
-
-L'ESP est volontairement laissé sans interaction pendant cette observation.
-
-## Configuration et compilation
-
-Le dashboard Web V2 responsive affiche trois cartes, les totaux disponibles
-et un etat complet/partiel. Il affiche `0` pour une mesure nulle valide et `—`
-pour une mesure indisponible. Le schema MQTT V2 ajoute versions, nom
-d'installation optionnel, temps onduleur/solaires, puissance DC totale,
-timestamps de reveil/sommeil, `data_complete` et `acquisition_result`.
-
-Les tags relais 51 et 311 sont rendus `Closed` et `Open`; `0x00FFFFFD` est
-publie `null`. Le signal SMA Bluetooth exige une transaction L1 distincte et
-reste donc `null` sans substitution par le RSSI ESP.
-
-Validation : sunset avec zero valide PASS, nuit joignable/partielle PASS.
-Le reveil naturel du matin reste **NOT YET TESTED**.
-
-Le firmware générique se configure entièrement via Web UI V3 et NVS. Il ne
-contient aucune identité d'installation ni credential SMA et ne requiert
-aucune recompilation pour une installation normale.
-
-```powershell
-arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs firmware/SmaBluetoothDiscovery
-```
-
-## Documentation
-
-- [Dataset complet et MQTT Snapshot V1](docs/complete-dataset-mqtt-v1.md)
-- [Configuration et Web UI V3](docs/configuration-web-v3.md)
-- [État du projet](docs/PROJECT_STATE.md)
-- [Audit SMA Phase 0](docs/phase-0-audit.md)
-- [Résultat Phase 1](docs/phase-1-result-final.md)
-- [Premier échange Data2+ Phase 2](docs/phase-2-first-session-result.md)
-- [Développement distant](docs/remote-development.md)
-
-## Références et licence
-
-[SBFspot](https://github.com/SBFspot/SBFspot) a servi de référence
-comportementale et protocolaire, avec attribution ; son code n'est pas recopié
-en bloc. Le dépôt ne contient actuellement aucun fichier de licence globale :
-les conditions de redistribution restent à formaliser avant une release finale.
+SMA et Sunny Boy sont des marques de SMA Solar Technology AG. Ce projet n'est
+ni affilié, ni approuvé par SMA. SBFspot et NANODE SMA PV MONITOR ont servi de
+références historiques et d'interopérabilité ; voir le document de provenance.

@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "Version.h"
+
 namespace SbfspotCompat {
 
 enum class ValueState : uint8_t { NotImplemented, Unavailable, Valid };
@@ -17,8 +19,8 @@ struct InverterSnapshot {
   bool acquisitionValid = false;
   bool acquisitionComplete = false;
   uint32_t lastSuccessfulAcquisition = 0;
-  char schemaVersion[8] = "2";
-  char firmwareVersion[40] = "SMA-SunnyBoy-Monitor 3.0";
+  char schemaVersion[8] = SMA_SCHEMA_VERSION;
+  char firmwareVersion[40] = SMA_FIRMWARE_VERSION;
   char plantName[40]{};
   char timestamp[24]{};
   char inverterTime[24]{};
@@ -58,7 +60,7 @@ struct InverterSnapshot {
 
 struct MqttConfig {
   bool enabled = false;
-  char broker[64] = "192.168.50.200";
+  char broker[64]{};
   uint16_t port = 1883;
   char username[40]{};
   char password[64]{};
