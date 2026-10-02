@@ -63,6 +63,7 @@ Documentation :
 - [sécurité](SECURITY.md) ;
 - [validation matérielle](docs/HARDWARE_VALIDATION.md) ;
 - [provenance du protocole](docs/PROTOCOL_PROVENANCE.md) ;
+- [inventaire des composants tiers](docs/THIRD_PARTY.md) ;
 - [documents historiques](docs/history/).
 
 ## Architecture mémoire

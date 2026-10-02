@@ -4,7 +4,10 @@ Status: code/build preparation only. Nothing in this document has been deployed 
 
 ## Sources and licensing
 
-- SBFspot is a behavioral/protocol reference under CC BY-NC-SA 3.0. No source was copied.
+- Historical note: SBFspot was used as a behavioral/protocol reference under
+  CC BY-NC-SA 3.0. The later provenance review does not make the older absolute
+  "no source copied" claim; see `../PROTOCOL_PROVENANCE.md` for the evidence-based
+  P/N/S/O/U classification.
 - ESP32_SMA-Inverter-MQTT is MIT-licensed and corroborates the login fields, query ranges, record layout and scaling.
 - ESP32_to_SMA_ESPHome corroborates the login sequence, but has no explicit license file; it was used only as a behavioral reference.
 
