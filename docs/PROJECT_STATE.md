@@ -88,3 +88,17 @@ masques par defaut et editables avec un bouton Afficher/Masquer. Les
 identites onduleur, Wi-Fi/AP, MQTT, installation, localisation, fuseau horaire
 et mot de passe OTA sont persistants. La mise a jour `.bin` authentifiee depuis
 le navigateur complete ArduinoOTA. Voir `configuration-web-v3.md`.
+
+La page Onduleurs inclut maintenant un scan Bluetooth Classic borne, une
+affectation vers INV1/INV2/INV3 et un test d'identite SMA. Le scheduler est
+suspendu sans dette pendant le workflow; le cycle reseau/BT normal est restaure
+avant sa reprise. Les MAC et identites detectees sont des informations
+techniques non editables.
+
+## Validation nuit et matin — 02/10/2026
+
+- **OVERNIGHT STABILITY PASS** ;
+- **NIGHT→MORNING FUNCTIONAL TRANSITION PASS** ;
+- **MORNING PRODUCTION TRANSITION PASS** ;
+- l'heure exacte du premier reveil n'a pas ete capturee, le collecteur PC
+  s'etant arrete a 01:36.

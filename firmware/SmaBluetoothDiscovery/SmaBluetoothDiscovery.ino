@@ -23,8 +23,10 @@
 namespace {
 constexpr uint32_t SERIAL_BAUD = 115200;
 constexpr uint32_t INQUIRY_DURATION_MS = 12000;
-constexpr uint32_t INQUIRY_WINDOW_MS = 1280;
-constexpr uint32_t INQUIRY_WINDOW_GRACE_MS = 150;
+// Network services and Wi-Fi are quiesced for product discovery, so one
+// continuous inquiry provides better coverage than the former short windows.
+constexpr uint32_t INQUIRY_WINDOW_MS = INQUIRY_DURATION_MS;
+constexpr uint32_t INQUIRY_WINDOW_GRACE_MS = 250;
 constexpr uint32_t WIFI_RECOVERY_WINDOW_MS = 1000;
 constexpr uint32_t STA_CONNECT_TIMEOUT_MS = 18000;
 constexpr uint32_t STA_RETRY_INTERVAL_MS = 60000;
@@ -52,7 +54,7 @@ uint32_t previousCheckpoint = 0;
 uint32_t previousAttempt = 0;
 esp_reset_reason_t bootResetReason = ESP_RST_UNKNOWN;
 
-enum class ScanState : uint8_t { IDLE, SCANNING, COMPLETE, ERROR };
+enum class ScanState : uint8_t { IDLE, PREPARING, SCANNING, COMPLETE, ERROR };
 enum class SmaLifecycleState : uint8_t {
   BT_OFF, BT_STARTING, BT_READY, CONNECTING, SESSION, TRANSACTION,
   DISCONNECTING, BT_STOPPING, FAILED, BACKOFF
@@ -230,6 +232,13 @@ uint32_t callbackCount = 0;
 wl_status_t lastWifiStatus = WL_NO_SHIELD;
 bool bluetoothReady = false;
 bool inquiryWindowActive = false;
+bool managedScanActive = false;
+bool networkAuditScan = false;
+bool inverterTestActive = false;
+size_t inverterTestSlot = 0;
+uint32_t inverterTestStartedAt = 0;
+uint32_t inverterTestCompletedAt = 0;
+char inverterTestResult[16] = "IDLE";
 bool otaBusy = false;
 bool apActive = false;
 volatile bool sppInitSeen = false;
@@ -551,6 +560,7 @@ void beginDiagnosticAttempt() {
 const char* scanStateName(ScanState value) {
   switch (value) {
     case ScanState::IDLE: return "IDLE";
+    case ScanState::PREPARING: return "PREPARING";
     case ScanState::SCANNING: return "SCANNING";
     case ScanState::COMPLETE: return "COMPLETE";
     case ScanState::ERROR: return "ERROR";
@@ -775,6 +785,22 @@ bool startNetworkAudit(bool withBt, bool wifiOff = false, bool rfcomm = false) {
   return true;
 }
 
+bool startManagedBtScan() {
+  if (managedScanActive || schedulerAcquisitionActive || inverterTestActive || otaBusy ||
+      bluetoothReady || smaLifecycleState != SmaLifecycleState::BT_OFF) return false;
+  networkAuditScan = true;
+  managedScanActive = true;
+  scanState = ScanState::PREPARING;
+  if (!startNetworkAudit(true, true, false)) {
+    networkAuditScan = false;
+    managedScanActive = false;
+    scanState = ScanState::ERROR;
+    return false;
+  }
+  addLog("[SCAN] managed workflow requested; scheduler suspended");
+  return true;
+}
+
 bool startSafeSmaAcquisition(size_t slot) {
   if (slot >= ProductConfig::kInverterCount || !productSettings.inverters[slot].enabled) return false;
   if ((networkAuditState != NetworkAuditState::IDLE &&
@@ -800,6 +826,24 @@ bool startSafeSmaAcquisition(size_t slot) {
   networkAuditSma = true;
   addLog("[ACQUIRE] safe SMA PACTot cycle requested slot=%u",
          static_cast<unsigned>(slot + 1));
+  return true;
+}
+
+bool startInverterIdentityTest(size_t slot) {
+  if (slot >= ProductConfig::kInverterCount || managedScanActive || inverterTestActive ||
+      schedulerAcquisitionActive || bluetoothReady ||
+      smaLifecycleState != SmaLifecycleState::BT_OFF) return false;
+  const auto& inverter = productSettings.inverters[slot];
+  if (!ProductConfig::validMac(inverter.mac) ||
+      !smaClient.setUserPassword(inverter.userPassword) ||
+      !smaClient.setTarget(inverter.mac, inverter.serial)) return false;
+  if (!startNetworkAudit(true, true, false)) return false;
+  combinedAcquisition = false;
+  combinedActive = false;
+  combinedState = CombinedState::IDLE;
+  smaSelectedSlot = slot;
+  smaAcquisitionMemory = {};
+  networkAuditSma = true;
   return true;
 }
 
@@ -899,6 +943,7 @@ void skipSchedulerSlot(uint32_t scheduledAt, size_t slot, const char* reason) {
 
 void serviceScheduler() {
   const uint32_t now = millis();
+  if (managedScanActive || inverterTestActive) return;
   if (schedulerAcquisitionActive) {
     schedulerState = SchedulerState::ACQUIRING;
     return;
@@ -1027,7 +1072,22 @@ void serviceNetworkAudit() {
       if (now - networkAuditStateAt >= 3000) {
         logBtStartResources("network_wifi_off");
         logTaskAudit("wifi_off");
-        if (networkAuditSma) {
+        if (networkAuditScan) {
+          sppInitSeen = false;
+          bluetoothReady = serialBt.begin("SMA-SunnyBoy-Monitor", true, true);
+          if (bluetoothReady) {
+            serialBt.setPin("0000", 4);
+            serialBt.onAuthComplete(onBtAuthComplete);
+            serialBt.register_callback(onSppEvent);
+            networkAuditStateAt = now;
+            networkAuditState = NetworkAuditState::WAIT_BT;
+            addLog("[SCAN] Bluetooth begin accepted");
+          } else {
+            scanState = ScanState::ERROR;
+            networkAuditState = NetworkAuditState::WAIT_BT;
+            addLog("[SCAN] Bluetooth begin failed");
+          }
+        } else if (networkAuditSma) {
           if (startSmaLifecycle()) {
             networkAuditState = NetworkAuditState::WAIT_SMA;
           } else {
@@ -1088,7 +1148,12 @@ void serviceNetworkAudit() {
       }
       break;
     case NetworkAuditState::WAIT_BT:
-      if (btOnlyState == BtOnlyTestState::COMPLETE || btOnlyState == BtOnlyTestState::FAILED) {
+      if (networkAuditScan && (scanState == ScanState::COMPLETE || scanState == ScanState::ERROR)) {
+        stopBluetoothService();
+        networkAuditRestoreStartedAt = millis();
+        connectSta();
+        restartNetworkAuditServices();
+      } else if (btOnlyState == BtOnlyTestState::COMPLETE || btOnlyState == BtOnlyTestState::FAILED) {
         if (networkAuditWifiOff) {
           networkAuditRestoreStartedAt = millis();
           connectSta();
@@ -1114,6 +1179,27 @@ void serviceNetworkAudit() {
           combinedState = smaLifecycleLastError[0] ? CombinedState::FAILED : CombinedState::COMPLETE;
           combinedActive = false;
           combinedAcquisition = false;
+        }
+        if (inverterTestActive) {
+          const bool pass = !smaLifecycleLastError[0] && smaClient.datasetUsable() &&
+                            smaClient.decodedSerial() == smaClient.expectedSerial();
+          if (pass && productSettings.inverters[inverterTestSlot].serial == 0) {
+            productSettings.inverters[inverterTestSlot].serial = smaClient.decodedSerial();
+            char key[12]; snprintf(key, sizeof(key), "inv%uSerial",
+                                   static_cast<unsigned>(inverterTestSlot + 1));
+            preferences.begin("sma-monitor", false);
+            preferences.putUInt(key, smaClient.decodedSerial()); preferences.end();
+          }
+          strlcpy(inverterTestResult, pass ? "PASS" : "FAIL", sizeof(inverterTestResult));
+          inverterTestCompletedAt = millis();
+          inverterTestActive = false;
+          addLog("[INV-TEST] slot=%u result=%s", static_cast<unsigned>(inverterTestSlot + 1),
+                 inverterTestResult);
+        }
+        if (networkAuditScan) {
+          networkAuditScan = false;
+          managedScanActive = false;
+          addLog("[SCAN] network restored; scheduler resumed");
         }
         if (schedulerAcquisitionActive) {
           schedulerCurrentRecord.completedAt = millis();
@@ -1771,6 +1857,21 @@ bool startBtScan() {
 }
 
 void serviceBtScan() {
+  if (scanState == ScanState::PREPARING) {
+    // begin()/isReady() can become true just before ESP_SPP_INIT_EVT. Inquiry
+    // is safe only after the public SPP init callback has actually arrived.
+    if (bluetoothReady && sppInitSeen) {
+      if (!startBtScan()) {
+        scanState = ScanState::ERROR;
+        addLog("[SCAN] ERROR managed_scan_start_failed");
+      }
+    } else if (networkAuditState == NetworkAuditState::WAIT_BT &&
+               millis() - networkAuditStateAt >= 10000) {
+      scanState = ScanState::ERROR;
+      addLog("[SCAN] ERROR spp_ready_timeout");
+    }
+    return;
+  }
   if (scanState != ScanState::SCANNING) return;
   const uint32_t now = millis();
   if (inquiryWindowActive && now - inquiryWindowStartedAt >= INQUIRY_WINDOW_MS + INQUIRY_WINDOW_GRACE_MS) {
@@ -1808,7 +1909,8 @@ String resultsJson() {
   String json;
   json.reserve(512 + count * 180);
   json += F("{\"state\":\""); json += scanStateName(scanState);
-  json += F("\",\"cycle\":"); json += scanNumber;
+  json += F("\",\"active\":"); json += managedScanActive ? F("true") : F("false");
+  json += F(",\"cycle\":"); json += scanNumber;
   json += F(",\"startedAtMs\":"); json += scanStartedAt;
   json += F(",\"completedAtMs\":"); json += scanCompletedAt;
   json += F(",\"overflow\":"); json += overflow ? F("true") : F("false");
@@ -2036,7 +2138,17 @@ String publicConfigJson() {
     json += F(",\"name\":\""); json += jsonEscape(inv.name); json += '"';
     json += F(",\"mac\":\""); json += jsonEscape(inv.mac); json += '"';
     json += F(",\"serial\":"); json += inv.serial;
-    json += F(",\"password\":\""); json += jsonEscape(inv.userPassword); json += F("\"}");
+    json += F(",\"password\":\""); json += jsonEscape(inv.userPassword); json += '"';
+    const auto& snapshot = inverterSnapshots[i];
+    json += F(",\"type\":");
+    if (snapshot.inverterTypeState == SbfspotCompat::ValueState::Valid) {
+      json += '"'; json += jsonEscape(snapshot.inverterType); json += '"';
+    } else json += F("null");
+    json += F(",\"softwareVersion\":");
+    if (snapshot.inverterSoftwareVersionState == SbfspotCompat::ValueState::Valid) {
+      json += '"'; json += jsonEscape(snapshot.inverterSoftwareVersion); json += '"';
+    } else json += F("null");
+    json += '}';
   }
   json += F("]}"); return json;
 }
@@ -2300,6 +2412,16 @@ String renderedPage() {
                "f.maintenanceMode.checked=cfg.maintenanceMode;f.otaPassword.value=cfg.otaPassword;q('#otaForm').auth.value=cfg.otaPassword}");
   page.replace("<label>Mot de passe OTA<input name=\"auth\" type=\"password\" required></label>",
                "<label>Confirmation du mot de passe administrateur / OTA<div class=\"secret\"><input name=\"auth\" type=\"password\" required><button type=\"button\" class=\"reveal\">Afficher</button></div><small>Ce champ ne crée pas un second mot de passe : il autorise uniquement cette installation.</small></label>");
+  page.replace("<section id=\"Inverters\" class=\"page\"><h2>Onduleurs</h2>",
+               "<section id=\"Inverters\" class=\"page\"><h2>Onduleurs</h2><div class=\"panel\"><h3>Découverte Bluetooth Classic</h3><p class=\"muted\">Le réseau sera brièvement indisponible pendant le scan; le scheduler reprendra automatiquement.</p><button type=\"button\" id=\"btScan\">Scanner Bluetooth</button> <span id=\"btScanState\"></span><div id=\"btResults\"></div><div class=\"row\"><label>Assigner à<select id=\"assignSlot\"><option value=\"1\">INV1</option><option value=\"2\">INV2</option><option value=\"3\">INV3</option></select></label><div class=\"actions\"><button type=\"button\" id=\"assignBt\" disabled>Assigner le périphérique sélectionné</button></div></div><hr><div class=\"row\"><label>Vérifier<select id=\"testSlot\"><option value=\"1\">INV1</option><option value=\"2\">INV2</option><option value=\"3\">INV3</option></select></label><div class=\"actions\"><button type=\"button\" id=\"testInv\">Tester la connexion</button></div></div><div id=\"testInvState\" class=\"muted\"></div></div><br>");
+  page.replace("<label>Adresse Bluetooth<input name=\"inv${n+1}Mac\"",
+               "<label>Adresse Bluetooth (information technique)<input readonly name=\"inv${n+1}Mac\"");
+  page.replace("<label>Numéro de série<input name=\"inv${n+1}Serial\"",
+               "<label>Numéro de série détecté<input readonly name=\"inv${n+1}Serial\"");
+  page.replace("<label>Mot de passe SMA USER",
+               "<p class=\"muted\">Type/version : ${x.type??'—'} / ${x.softwareVersion??'—'}</p><label>Mot de passe SMA USER");
+  page.replace("q('#inverterForm').onsubmit=",
+               "async function postData(u,v){let r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(v)});if(!r.ok)throw Error(await r.text());return r.json()}function renderBt(r){btScanState.textContent=r.active?'Scan en cours…':r.state==='COMPLETE'?`${r.devices.length} périphérique(s) trouvé(s)`:`État : ${r.state}`;btResults.innerHTML=r.devices.length?`<table><tr><th></th><th>Nom</th><th>MAC</th><th>RSSI</th><th>Information fiable</th></tr>${r.devices.map(d=>`<tr><td><input type=\"radio\" name=\"btChoice\" value=\"${d.mac}\"></td><td>${d.name??'Inconnu'}</td><td><code>${d.mac}</code></td><td>${d.rssi??'—'}</td><td>${d.sma?'Configuré : '+d.sma.label:'—'}</td></tr>`).join('')}</table>`:'<p class=\"muted\">Aucun résultat.</p>';qa('input[name=btChoice]').forEach(x=>x.onchange=()=>assignBt.disabled=false)}async function pollBt(){try{let r=await get('/api/bt/results');renderBt(r);if(r.active)setTimeout(pollBt,2000);else btScan.disabled=false}catch(e){btScanState.textContent='Réseau interrompu pendant le scan…';setTimeout(pollBt,3000)}}btScan.onclick=async()=>{btScan.disabled=true;assignBt.disabled=true;btScanState.textContent='Préparation du scan…';try{await postData('/api/bt/scan',{});setTimeout(pollBt,1500)}catch(e){btScan.disabled=false;btScanState.textContent=e}};assignBt.onclick=async()=>{let d=q('input[name=btChoice]:checked');if(!d)return;assignBt.disabled=true;try{await postData('/api/inverters/assign',{slot:assignSlot.value,mac:d.value});cfg=await get('/api/config');window.configLoaded=false;fill();window.configLoaded=true;btScanState.textContent=`Assigné à INV${assignSlot.value}`}catch(e){btScanState.textContent=e}finally{assignBt.disabled=false}};async function pollInvTest(){try{let r=await get('/api/inverters/test/status');testInvState.textContent=r.active?'Test SMA en cours…':r.result==='PASS'?`PASS — SN ${r.detectedSerial??'—'} — ${r.type??'type inconnu'} — ${r.softwareVersion??'version inconnue'}`:`${r.result}`;if(r.active)setTimeout(pollInvTest,2500);else{testInv.disabled=false;cfg=await get('/api/config');window.configLoaded=false;fill();window.configLoaded=true}}catch(e){testInvState.textContent='Réseau interrompu pendant le test…';setTimeout(pollInvTest,3000)}}testInv.onclick=async()=>{testInv.disabled=true;testInvState.textContent='Préparation du test…';try{await postData('/api/inverters/test',{slot:testSlot.value});setTimeout(pollInvTest,1500)}catch(e){testInv.disabled=false;testInvState.textContent=e}};q('#inverterForm').onsubmit=");
   return page;
 #if 0
   page.replace("<h2>Onduleurs</h2>",
@@ -2342,7 +2464,10 @@ void registerRoutes() {
     if (!requireWebConfigAuthentication()) return;
     noteHttpRequest("config"); sendJson(publicConfigJson());
   });
-  server.on("/api/bt/results", HTTP_GET, [] { noteHttpRequest("results"); sendJson(resultsJson()); });
+  server.on("/api/bt/results", HTTP_GET, [] {
+    if (!requireWebConfigAuthentication()) return;
+    noteHttpRequest("results"); sendJson(resultsJson());
+  });
   server.on("/api/log", HTTP_GET, [] { noteHttpRequest("log"); sendJson(logJson()); });
   server.on("/api/sma/status", HTTP_GET, [] { noteHttpRequest("sma_status"); sendJson(smaStatusJson()); });
   server.on("/api/scheduler/status", HTTP_GET, [] {
@@ -2541,7 +2666,7 @@ void registerRoutes() {
     if (!productSettings.inverters[slot].enabled) {
       sendJson("{\"error\":\"inverter_slot_disabled\"}", 409); return;
     }
-    if (!startSafeSmaAcquisition(slot)) {
+    if (!startInverterIdentityTest(slot)) {
       if (smaLifecycleState == SmaLifecycleState::BACKOFF) {
         sendJson("{\"error\":\"sma_backoff_active\"}", 429);
       } else {
@@ -2586,11 +2711,78 @@ void registerRoutes() {
     response += delayMs; response += '}'; sendJson(response, 202);
   });
   server.on("/api/bt/scan", HTTP_POST, [] {
+    if (!requireWebConfigAuthentication()) return;
     noteHttpRequest("scan");
-    if (scanState == ScanState::SCANNING) { sendJson("{\"error\":\"scan_already_running\"}", 409); return; }
+    if (managedScanActive || scanState == ScanState::PREPARING || scanState == ScanState::SCANNING) {
+      sendJson("{\"error\":\"scan_already_running\"}", 409); return;
+    }
     if (otaBusy) { sendJson("{\"error\":\"ota_in_progress\"}", 409); return; }
-    if (!startBtScan()) { sendJson("{\"error\":\"scan_start_failed\"}", 500); return; }
-    sendJson("{\"accepted\":true,\"state\":\"SCANNING\"}", 202);
+    if (!startManagedBtScan()) { sendJson("{\"error\":\"scan_busy\"}", 409); return; }
+    sendJson("{\"accepted\":true,\"state\":\"PREPARING\"}", 202);
+  });
+  server.on("/api/inverters/assign", HTTP_POST, [] {
+    if (!requireWebConfigAuthentication()) return;
+    const long requestedSlot = server.arg("slot").toInt();
+    String mac = server.arg("mac"); mac.toUpperCase();
+    if (requestedSlot < 1 || requestedSlot > static_cast<long>(ProductConfig::kInverterCount) ||
+        !ProductConfig::validMac(mac.c_str()) || managedScanActive) {
+      sendJson("{\"error\":\"invalid_assignment\"}", 400); return;
+    }
+    bool discovered = false;
+    portENTER_CRITICAL(&resultsMux);
+    for (size_t i = 0; i < btResultCount; ++i)
+      if (strcmp(btResults[i].mac, mac.c_str()) == 0) { discovered = true; break; }
+    portEXIT_CRITICAL(&resultsMux);
+    if (!discovered) { sendJson("{\"error\":\"device_not_in_scan\"}", 409); return; }
+    const size_t slot = static_cast<size_t>(requestedSlot - 1);
+    for (size_t i = 0; i < ProductConfig::kInverterCount; ++i) {
+      if (i != slot && strcmp(productSettings.inverters[i].mac, mac.c_str()) == 0) {
+        sendJson("{\"error\":\"device_already_assigned\"}", 409); return;
+      }
+    }
+    strlcpy(productSettings.inverters[slot].mac, mac.c_str(),
+            sizeof(productSettings.inverters[slot].mac));
+    char key[12]; snprintf(key, sizeof(key), "inv%uMac", static_cast<unsigned>(slot + 1));
+    preferences.begin("sma-monitor", false); preferences.putString(key, mac); preferences.end();
+    addLog("[CONFIG] discovered Bluetooth device assigned to slot=%u",
+           static_cast<unsigned>(slot + 1));
+    sendJson("{\"saved\":true}");
+  });
+  server.on("/api/inverters/test", HTTP_POST, [] {
+    if (!requireWebConfigAuthentication()) return;
+    const long requestedSlot = server.arg("slot").toInt();
+    if (requestedSlot < 1 || requestedSlot > static_cast<long>(ProductConfig::kInverterCount) ||
+        managedScanActive || inverterTestActive || schedulerAcquisitionActive) {
+      sendJson("{\"error\":\"test_busy_or_invalid\"}", 409); return;
+    }
+    const size_t slot = static_cast<size_t>(requestedSlot - 1);
+    if (!startSafeSmaAcquisition(slot)) {
+      sendJson("{\"error\":\"test_start_failed\"}", 409); return;
+    }
+    inverterTestSlot = slot; inverterTestStartedAt = millis(); inverterTestCompletedAt = 0;
+    strlcpy(inverterTestResult, "RUNNING", sizeof(inverterTestResult));
+    inverterTestActive = true;
+    sendJson("{\"accepted\":true,\"result\":\"RUNNING\"}", 202);
+  });
+  server.on("/api/inverters/test/status", HTTP_GET, [] {
+    if (!requireWebConfigAuthentication()) return;
+    String json(F("{\"active\":")); json += inverterTestActive ? F("true") : F("false");
+    json += F(",\"slot\":"); json += static_cast<unsigned>(inverterTestSlot + 1);
+    json += F(",\"result\":\""); json += inverterTestResult;
+    json += F("\",\"startedAtMs\":"); json += inverterTestStartedAt;
+    json += F(",\"completedAtMs\":"); json += inverterTestCompletedAt;
+    json += F(",\"detectedSerial\":");
+    if (smaClient.decodedSerial()) json += smaClient.decodedSerial(); else json += F("null");
+    const auto& snapshot = inverterSnapshots[inverterTestSlot];
+    json += F(",\"type\":");
+    if (snapshot.inverterTypeState == SbfspotCompat::ValueState::Valid) {
+      json += '"'; json += jsonEscape(snapshot.inverterType); json += '"';
+    } else json += F("null");
+    json += F(",\"softwareVersion\":");
+    if (snapshot.inverterSoftwareVersionState == SbfspotCompat::ValueState::Valid) {
+      json += '"'; json += jsonEscape(snapshot.inverterSoftwareVersion); json += '"';
+    } else json += F("null");
+    json += F("}"); sendJson(json);
   });
   server.on("/api/wifi/networks", HTTP_GET, [] {
     if (!requireWebConfigAuthentication()) return;

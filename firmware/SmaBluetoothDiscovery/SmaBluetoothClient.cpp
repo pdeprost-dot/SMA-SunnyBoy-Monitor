@@ -37,7 +37,7 @@ bool SmaBluetoothClient::setTarget(const char* mac, uint32_t serial) {
   if (state_ != State::DISCONNECTED && state_ != State::ERROR) return false;
   unsigned values[6]{};
   char trailing = 0;
-  if (mac == nullptr || serial == 0 ||
+  if (mac == nullptr ||
       sscanf(mac, "%2x:%2x:%2x:%2x:%2x:%2x%c", &values[0], &values[1], &values[2],
              &values[3], &values[4], &values[5], &trailing) != 6) return false;
   for (size_t index = 0; index < 6; ++index) {
@@ -677,12 +677,13 @@ bool SmaBluetoothClient::decodeIdentity(const uint8_t* l2, size_t length) {
   const uint16_t receivedPacketId = read16(l2 + 27) & 0x7FFF;
   if (receivedPacketId != packetId_) { fail("identity_packet_id_mismatch"); return false; }
   decodedSerial_ = read32(l2 + 57);
-  if (decodedSerial_ != expectedSerial_) {
+  if (expectedSerial_ != 0 && decodedSerial_ != expectedSerial_) {
     emit("[SMA] identity serial=%lu expected=%lu", static_cast<unsigned long>(decodedSerial_),
          static_cast<unsigned long>(expectedSerial_));
     fail("identity_serial_mismatch");
     return false;
   }
+  if (expectedSerial_ == 0) expectedSerial_ = decodedSerial_;
   emit("[SMA] session valid fcs=%04X packet_id=%u serial=%lu", receivedFcs, receivedPacketId,
        static_cast<unsigned long>(decodedSerial_));
   return true;

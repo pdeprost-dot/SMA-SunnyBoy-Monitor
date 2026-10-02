@@ -43,3 +43,17 @@ Maintenance suspends planned SMA acquisitions while leaving Wi-Fi, Web, MQTT
 and OTA available. Network changes and OTA-password replacements require a
 reboot. All SMA scheduler, two-attempt limit, network-quiesce Bluetooth
 lifecycle, retained MQTT and zero/null rules remain unchanged.
+
+## Inverter installation
+
+The Inverters page provides a bounded Bluetooth Classic scan. It temporarily
+suspends scheduling, quiesces network services and Wi-Fi, performs one
+continuous inquiry, stops Bluetooth, restores Wi-Fi/Web/OTA/MQTT and resumes
+the scheduler. Every discovered device is shown; only an exact match with an
+already configured address is labelled as configured SMA equipment.
+
+A discovered address can be assigned to INV1, INV2 or INV3 without changing
+the slot's enabled flag, friendly name or SMA USER password. MAC and detected
+serial/type/software version are read-only technical information. **Tester la
+connexion** uses the validated isolated SMA lifecycle to verify identity and
+restores normal operation automatically.
