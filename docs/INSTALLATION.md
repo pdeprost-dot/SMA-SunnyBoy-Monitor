@@ -229,7 +229,58 @@ partitions n'est pas une OTA applicative ordinaire et demande une procédure USB
 - Ne jamais committer secrets ou identifiants d'installation.
 - Conserver hors dépôt un `.bin` connu fonctionnel et son SHA-256.
 
-## J. Dépannage
+## J. Réutiliser un ESP32 / retour à l'état usine
+
+> **ATTENTION — EFFACEMENT DESTRUCTIF.** Cette procédure supprime toute la
+> flash persistante, notamment la NVS : Wi-Fi, mot de passe administrateur,
+> affectations SMA, mots de passe SMA, MQTT, OTA, localisation et tous les
+> autres réglages seront définitivement perdus.
+
+Un retour usine est adapté pour recycler une carte, la transférer à une autre
+installation ou un autre utilisateur, supprimer des identifiants inconnus, ou
+repartir volontairement d'une installation vierge. Il n'est pas nécessaire
+pour une mise à jour normale, une OTA, un redémarrage ou la récupération réseau
+par le point d'accès de secours.
+
+### Effacement complet avec Arduino IDE 2.x
+
+Les libellés suivants ont été vérifiés avec **ESP32 Dev Module** et
+Arduino-ESP32 **3.3.11** :
+
+1. Brancher l'ESP32 par USB et ouvrir
+   `firmware/SmaBluetoothDiscovery/SmaBluetoothDiscovery.ino`.
+2. Vérifier **Tools > Board > esp32 > ESP32 Dev Module**, le bon port COM et
+   **Partition Scheme > Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)**.
+3. Choisir **Tools > Erase All Flash Before Sketch Upload > Enabled**.
+4. Cliquer **Upload**. L'IDE efface toute la flash avant de réinstaller le
+   firmware par USB.
+5. Attendre la fin de l'envoi et le premier démarrage.
+6. Revenir ensuite à **Tools > Erase All Flash Before Sketch Upload >
+   Disabled**. C'est le réglage normal : les téléversements USB suivants ne
+   doivent pas effacer la configuration.
+
+Après cet effacement réel, RC2 repart avec une NVS vierge :
+
+- l'ESP32 ouvre son point d'accès de configuration ;
+- l'utilisateur Web est `admin` et son mot de passe initial est vide ;
+- ArduinoOTA et l'OTA navigateur restent désactivés tant que le secret
+  administrateur est vide ;
+- l'utilisateur configure Wi-Fi, les affectations SMA et, si souhaité, MQTT ;
+- il définit un nouveau mot de passe administrateur individuel ;
+- les réglages sont alors enregistrés en NVS et l'OTA devient disponible après
+  le redémarrage demandé.
+
+### Ce que le retour usine n'est pas
+
+- Le **fallback AP** est une récupération réseau : il conserve la NVS et exige
+  toujours l'authentification déjà configurée.
+- Un téléversement USB normal ou une OTA applicative conserve normalement la
+  NVS.
+- L'effacement complet n'est pas une récupération de mot de passe conservant
+  les réglages : il supprime volontairement le mot de passe **et toute la
+  configuration**.
+
+## K. Dépannage
 
 | Problème | Vérifications utiles |
 |---|---|
@@ -246,6 +297,7 @@ partitions n'est pas une OTA applicative ordinaire et demande une procédure USB
 | Pas de reconnexion | Attendre, consulter Serial 115200/DHCP, puis restaurer par USB. |
 | Carte neuve | Utiliser `admin` avec un mot de passe vide, puis définir immédiatement un secret individuel dans **System**. |
 | OTA indisponible | Définir un mot de passe administrateur non vide puis redémarrer. |
+| Carte à recycler ou identifiants inconnus | Suivre la section **Réutiliser un ESP32 / retour à l'état usine** ; toutes les données NVS seront perdues. |
 
 ## Annexe avancée : Arduino CLI
 
