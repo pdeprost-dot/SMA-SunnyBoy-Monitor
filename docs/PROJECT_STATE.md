@@ -3,7 +3,7 @@
 ## Release candidate
 
 - branche : `feature/sma-memory-alignment-v1` ;
-- version firmware : `1.0.0-rc.1` ;
+- version firmware : `1.0.0-rc.2` ;
 - schéma MQTT : `2` ;
 - cible : ESP32-WROOM-32, Arduino-ESP32 3.3.11, `min_spiffs` ;
 - matériel de référence : trois SMA Sunny Boy SB 2500HF-30.

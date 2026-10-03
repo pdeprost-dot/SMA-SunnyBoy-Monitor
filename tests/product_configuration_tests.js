@@ -5,6 +5,8 @@ const validPrefix = value => value.length > 0 && value.length < 48 &&
   [...value].every(c => c.charCodeAt(0) >= 0x20);
 const validMac = value => /^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/.test(value);
 const validWpa = value => value.length >= 8 && value.length <= 63;
+const validAdminPassword = value => value.length === 0 || validWpa(value);
+const resolveAdminPassword = (keyPresent, stored) => keyPresent ? stored : '';
 const topic = (prefix, slot) => `${prefix}/inv${slot + 1}`;
 const unavailable = value => value === null ? '--' : String(value);
 
@@ -14,6 +16,10 @@ assert.deepEqual([0, 1, 2].map(i => topic('smaesp', i)), ['smaesp/inv1', 'smaesp
 assert(validMac('02:00:00:00:00:01'));
 assert(!validMac('02:00:00:00:00'));
 assert(validWpa('12345678') && !validWpa('short'));
+assert(validAdminPassword('') && validAdminPassword('12345678') && !validAdminPassword('short'));
+assert.equal(resolveAdminPassword(false, undefined), '');
+assert.equal(resolveAdminPassword(true, 'existing-secret'), 'existing-secret');
+assert.equal(resolveAdminPassword(true, ''), '');
 assert(-90 >= -90 && 90 <= 90 && -180 >= -180 && 180 <= 180);
 assert.equal(unavailable(null), '--');
 assert.equal(unavailable(0), '0');
@@ -26,4 +32,4 @@ const formatted = new Intl.DateTimeFormat('fr-BE', {
   hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
 }).format(new Date('2026-06-21T12:34:56Z'));
 assert.match(formatted, /^21\/06\/2026 14:34:56$/);
-console.log('PASS 10/10 product configuration vectors');
+console.log('PASS product configuration vectors');

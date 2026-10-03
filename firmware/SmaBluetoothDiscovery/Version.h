@@ -1,7 +1,7 @@
 #pragma once
 
 #define SMA_FIRMWARE_NAME "SMA-SunnyBoy-Monitor"
-#define SMA_FIRMWARE_VERSION "1.0.0-rc.1"
+#define SMA_FIRMWARE_VERSION "1.0.0-rc.2"
 #define SMA_SCHEMA_VERSION "2"
 
 namespace SmaVersion {

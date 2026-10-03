@@ -84,6 +84,18 @@ bool validWpaPassword(const char* value) {
   return n >= 8 && n <= 63;
 }
 bool validOtaPassword(const char* value) { return value && strlen(value) >= 8 && strlen(value) <= 63; }
+bool validAdminPassword(const char* value) {
+  return value && (value[0] == '\0' || validOtaPassword(value));
+}
+bool resolveAdminPassword(bool storedKeyPresent, const char* storedValue,
+                          char* output, size_t capacity) {
+  if (!output || capacity == 0 || (storedKeyPresent && !storedValue)) return false;
+  const char* selected = storedKeyPresent ? storedValue : "";
+  const size_t length = strlen(selected);
+  if (length >= capacity) return false;
+  memcpy(output, selected, length + 1);
+  return true;
+}
 bool validLatitude(double value) { return std::isfinite(value) && value >= -90.0 && value <= 90.0; }
 bool validLongitude(double value) { return std::isfinite(value) && value >= -180.0 && value <= 180.0; }
 

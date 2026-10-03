@@ -36,11 +36,11 @@ retourne HTTP 409. L'OTA n'est traitée que hors scan.
 
 ## OTA LAN
 
-Le hostname est imprimé sur Serial. Dans RC1, un secret administrateur/OTA
-aléatoire est créé en NVS si aucun secret valide n'existe, mais sa valeur n'est
-pas imprimée. Cette limite empêche le provisionnement Web autonome d'une NVS
-vierge ; voir [INSTALLATION.md](INSTALLATION.md). Une installation existante
-doit conserver son secret configuré dans un emplacement privé.
+Le hostname est imprimé sur Serial. Sur une NVS vierge, le Web accepte `admin`
+avec un mot de passe vide ; les mécanismes OTA restent désactivés jusqu'à la
+définition d'un mot de passe administrateur non vide puis redémarrage. Voir
+[INSTALLATION.md](INSTALLATION.md). Une installation existante conserve son
+secret configuré.
 
 Compiler avec une partition à deux slots OTA :
 

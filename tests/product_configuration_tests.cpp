@@ -18,6 +18,15 @@ int main() {
   check(ProductConfig::validMac("02:00:00:00:00:01") && !ProductConfig::validMac("02:00:00:00:00"), "Bluetooth MAC validation");
   check(ProductConfig::validWpaPassword("12345678") && !ProductConfig::validWpaPassword("short"), "AP password validation");
   check(ProductConfig::validOtaPassword("12345678") && !ProductConfig::validOtaPassword(""), "OTA password validation");
+  check(ProductConfig::validAdminPassword("") && ProductConfig::validAdminPassword("12345678") &&
+        !ProductConfig::validAdminPassword("short"), "admin password permits intentional empty value");
+  char adminPassword[64]{};
+  check(ProductConfig::resolveAdminPassword(false, nullptr, adminPassword, sizeof(adminPassword)) &&
+        adminPassword[0] == '\0', "virgin NVS resolves to empty admin password");
+  check(ProductConfig::resolveAdminPassword(true, "existing-secret", adminPassword, sizeof(adminPassword)) &&
+        !std::strcmp(adminPassword, "existing-secret"), "existing admin password is preserved");
+  check(ProductConfig::resolveAdminPassword(true, "", adminPassword, sizeof(adminPassword)) &&
+        adminPassword[0] == '\0', "stored empty admin password is preserved");
   check(ProductConfig::validLatitude(-90) && ProductConfig::validLatitude(90) && !ProductConfig::validLatitude(90.1) &&
         ProductConfig::validLongitude(-180) && ProductConfig::validLongitude(180) && !ProductConfig::validLongitude(180.1), "location limits");
   time_t sample = 1704067200; char formatted[24]{};

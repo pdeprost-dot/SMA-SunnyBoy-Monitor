@@ -1,17 +1,14 @@
 # Installation, compilation et mises à jour
 
 Ce guide décrit le cycle complet du firmware **SMA-SunnyBoy-Monitor
-1.0.0-rc.1** avec Arduino IDE 2.x sous Windows 10/11. La configuration validée
+1.0.0-rc.2** avec Arduino IDE 2.x sous Windows 10/11. La configuration validée
 est Arduino-ESP32 3.3.11, PubSubClient 2.8 et le schéma de partitions
 `min_spiffs`.
 
-> **Limite RC1 au premier démarrage :** sur une carte dont la NVS est vierge,
-> le firmware crée un mot de passe administrateur aléatoire, mais ne l'affiche
-> pas. Or ce secret protège l'interface Web, ArduinoOTA et l'OTA navigateur.
-> L'installation générique sur une carte neuve ne peut donc pas terminer sa
-> configuration Web sans mécanisme de provisionnement supplémentaire. Ne
-> devinez pas ce secret. Ce défaut doit être corrigé avant une release destinée
-> à un nouvel utilisateur. Une carte déjà configurée conserve son secret NVS.
+Sur une carte neuve, le compte Web initial est `admin` avec un mot de passe
+vide. Définissez un mot de passe administrateur individuel dès la première
+configuration. Tant qu'il reste vide, ArduinoOTA et l'OTA navigateur sont
+désactivés.
 
 ## A. Première installation avec Arduino IDE
 
@@ -111,15 +108,16 @@ HTTP sur le port 80.
 
 ### 2. Authentification Web
 
-La connexion HTTP Basic utilise :
+Au premier démarrage sur NVS vierge, la connexion HTTP Basic utilise :
 
 - utilisateur `admin` ;
-- mot de passe : secret **administrateur / OTA** enregistré en NVS.
+- mot de passe : laisser le champ **vide**.
 
-Ce même secret protège le Web, ArduinoOTA et l'installation d'un `.bin`. Les
-champs secrets sont masqués par défaut et disposent d'**Afficher/Masquer**.
-La limite RC1 en tête de guide s'applique à une NVS vierge : la valeur initiale
-aléatoire n'est pas communiquée par le firmware actuel.
+Définissez ensuite dans **System** un mot de passe administrateur/OTA. Ce même
+secret protégera le Web, ArduinoOTA et l'installation d'un `.bin`. Les champs
+secrets sont masqués par défaut et disposent d'**Afficher/Masquer**. Si vous le
+laissez volontairement vide, l'accès Web reste `admin` + mot de passe vide,
+y compris sur le LAN, et les deux mécanismes OTA restent désactivés.
 
 ### 3. Parcours de configuration Web
 
@@ -151,7 +149,7 @@ Après reboot, vérifier :
 - affectations INV1/INV2/INV3 visibles ;
 - scheduler `RUNNING` et acquisitions affichées ;
 - MQTT connecté si activé ;
-- version `1.0.0-rc.1` affichée ;
+- version `1.0.0-rc.2` affichée ;
 - Bluetooth revenu à `BT_OFF` entre acquisitions ;
 - OTA disponible, sans reboot/panic dans **Diagnostics**.
 
@@ -196,9 +194,9 @@ finalisation ni nouveau boot n'est pas un succès.
 4. Pour l'OTA Web, choisir seulement **`SmaBluetoothDiscovery.ino.bin`**.
 
 Ne jamais envoyer les fichiers contenant `bootloader`, `partitions` ou
-`merged` via l'OTA Web. L'application doit tenir dans **1 966 080 octets**. À
-titre d'exemple daté, le build RC1 validé le 3 octobre 2026 produisait un `.bin`
-de 1 856 288 octets ; ce chiffre changera avec le code et les outils.
+`merged` via l'OTA Web. L'application doit tenir dans **1 966 080 octets**. La
+taille exacte varie avec le code et les outils et doit être contrôlée à chaque
+build.
 
 ## G. Mise à jour `.bin` depuis le navigateur
 
@@ -246,7 +244,8 @@ partitions n'est pas une OTA applicative ordinaire et demande une procédure USB
 | Authentification refusée | Utiliser le secret admin/OTA, pas Wi-Fi/AP/MQTT/SMA. |
 | OTA Web rejetée | `.ino.bin` applicatif, taille, auth et acquisition inactive. |
 | Pas de reconnexion | Attendre, consulter Serial 115200/DHCP, puis restaurer par USB. |
-| Carte neuve, secret admin inconnu | Limite RC1 en tête : ne pas deviner ; correctif/provisionnement requis. |
+| Carte neuve | Utiliser `admin` avec un mot de passe vide, puis définir immédiatement un secret individuel dans **System**. |
+| OTA indisponible | Définir un mot de passe administrateur non vide puis redémarrer. |
 
 ## Annexe avancée : Arduino CLI
 

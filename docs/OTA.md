@@ -5,6 +5,11 @@ Deux mécanismes utilisent le même secret administrateur :
 - ArduinoOTA sur le LAN ;
 - envoi d'un fichier `.bin` depuis la page Système.
 
+Sur un appareil neuf, le mot de passe administrateur est initialement vide et
+les deux mécanismes OTA sont désactivés. Ils deviennent disponibles après
+définition d'un mot de passe non vide dans **System** puis redémarrage. Cela
+évite qu'une première configuration locale rende l'OTA non authentifiée.
+
 Une barre à 100 % ne suffit pas : un test OTA est PASS uniquement après
 finalisation, sélection de la partition, redémarrage et identification de la
 nouvelle version. Le schéma `min_spiffs` fournit deux partitions applicatives

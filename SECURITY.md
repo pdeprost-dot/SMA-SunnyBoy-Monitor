@@ -13,6 +13,13 @@ exposé directement à Internet.
 - Les images OTA sont authentifiées par mot de passe mais ne sont pas signées.
 - Les diagnostics, Serial et MQTT ne doivent jamais contenir de secret.
 
+Sur NVS vierge, le Web accepte initialement `admin` avec un mot de passe vide
+afin de permettre le provisionnement local par le point d'accès de secours.
+ArduinoOTA et l'OTA navigateur restent désactivés jusqu'à la définition d'un
+mot de passe administrateur non vide. Laisser ce mot de passe vide maintient
+l'interface Web sans protection par secret, y compris sur le LAN : définir un
+mot de passe individuel avant l'exploitation normale est fortement recommandé.
+
 Utiliser un VLAN ou réseau IoT isolé, un mot de passe unique et fort, et ne pas
 réutiliser un credential sensible d'un autre service.
 

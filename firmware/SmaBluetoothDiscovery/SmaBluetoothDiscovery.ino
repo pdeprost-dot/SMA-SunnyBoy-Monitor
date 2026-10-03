@@ -189,6 +189,7 @@ uint32_t inverterTestStartedAt = 0;
 uint32_t inverterTestCompletedAt = 0;
 char inverterTestResult[16] = "IDLE";
 bool otaBusy = false;
+bool otaServiceReady = false;
 bool apActive = false;
 volatile bool sppInitSeen = false;
 volatile uint32_t sppCloseAt = 0;
@@ -821,8 +822,12 @@ void serviceScheduler() {
 
 void restartNetworkAuditServices() {
   server.begin();
-  ArduinoOTA.begin();
-  addLog("[NETWORK] services_restarted web=true ota=true mdns=true");
+  if (!otaPassword.isEmpty()) {
+    ArduinoOTA.begin();
+    otaServiceReady = true;
+  }
+  addLog("[NETWORK] services_restarted web=true ota=%s mdns=%s",
+         otaServiceReady ? "true" : "false", otaServiceReady ? "true" : "false");
   networkAuditState = NetworkAuditState::WAIT_MQTT;
 }
 
@@ -832,7 +837,10 @@ void serviceNetworkAudit() {
     case NetworkAuditState::MQTT_SETTLE:
       if (now - networkAuditStateAt >= 2000) {
         logBtStartResources("network_mqtt_off");
-        ArduinoOTA.end();  // ArduinoOTA 3.3.11 also calls MDNS.end().
+        if (otaServiceReady) {
+          ArduinoOTA.end();  // ArduinoOTA 3.3.11 also calls MDNS.end().
+          otaServiceReady = false;
+        }
         networkAuditStateAt = now;
         networkAuditState = NetworkAuditState::OTA_MDNS_SETTLE;
       }
@@ -1424,7 +1432,9 @@ String statusJson() {
   json += F("\",\"sunrise\":"); if (riseText[0]) { json += '"'; json += riseText; json += '"'; } else json += F("null");
   json += F(",\"sunset\":"); if (setText[0]) { json += '"'; json += setText; json += '"'; } else json += F("null");
   json += F("},\"ota\":{\"busy\":"); json += otaBusy ? F("true") : F("false");
-  json += F(",\"ready\":true,\"browserUpdate\":true}}");
+  json += F(",\"ready\":"); json += otaServiceReady ? F("true") : F("false");
+  json += F(",\"browserUpdate\":"); json += otaPassword.isEmpty() ? F("false") : F("true");
+  json += F("}}");
   return json;
 }
 
@@ -1538,6 +1548,7 @@ String publicConfigJson() {
   json += F(",\"apSsid\":\""); json += jsonEscape(apSsid.c_str()); json += '"';
   json += F(",\"apPassword\":\""); json += jsonEscape(apPassword.c_str()); json += F("\"}");
   json += F(",\"otaPassword\":\""); json += jsonEscape(otaPassword.c_str()); json += '"';
+  json += F(",\"adminPasswordConfigured\":"); json += otaPassword.isEmpty() ? F("false") : F("true");
   json += F(",\"maintenanceMode\":"); json += productSettings.maintenanceMode ? F("true") : F("false");
   json += F(",\"timezone\":\""); json += jsonEscape(productSettings.timezone);
   json += F("\",\"mqtt\":{\"enabled\":"); json += mqttOutput.config().enabled ? F("true") : F("false");
@@ -1755,7 +1766,7 @@ String renderedPage() {
   page.replace("<small>Vide : conserver le secret configuré. Redémarrage requis après remplacement.</small>",
                "<small>Redémarrage requis après modification.</small>");
   page.replace("<label>Mot de passe OTA<div class=\"secret\"><input name=\"otaPassword\"",
-               "<div class=\"panel\"><b>Un seul mot de passe administrateur / OTA</b><p class=\"muted\">Il protège la connexion Web admin, ArduinoOTA et l'installation d'un fichier .bin depuis le navigateur.</p></div><label>Modifier le mot de passe administrateur / OTA<div class=\"secret\"><input name=\"otaPassword\"");
+               "<div class=\"panel\"><b>Un seul mot de passe administrateur / OTA</b><p class=\"muted\">Il protège la connexion Web admin, ArduinoOTA et l'installation d'un fichier .bin depuis le navigateur. Sur un appareil neuf il est vide : connectez-vous avec admin et un mot de passe vide, puis définissez-en un ici. Tant qu'il reste vide, les deux mises à jour OTA sont désactivées.</p></div><label>Modifier le mot de passe administrateur / OTA<div class=\"secret\"><input name=\"otaPassword\"");
   page.replace("f.apSsid.value=cfg.network.apSsid;wifiConfigured.textContent=cfg.network.passwordConfigured?'— mot de passe configuré':'';",
                "f.apSsid.value=cfg.network.apSsid;f.password.value=cfg.network.password;f.apPassword.value=cfg.network.apPassword;wifiConfigured.textContent='';");
   page.replace("f.interval.value=cfg.mqtt.interval;invFields.innerHTML=",
@@ -1910,7 +1921,7 @@ void registerRoutes() {
                         zone == "Europe/Brussels" ? "CET-1CEST,M3.5.0,M10.5.0/3" : nullptr;
     if (plant.length() >= sizeof(productSettings.plantName) || !posix ||
         !ProductConfig::validLatitude(latitude) || !ProductConfig::validLongitude(longitude) ||
-        !ProductConfig::validOtaPassword(otaCandidate.c_str())) {
+        !ProductConfig::validAdminPassword(otaCandidate.c_str())) {
       sendJson("{\"error\":\"invalid_system_configuration\"}", 400); return;
     }
     preferences.begin("sma-monitor", false);
@@ -1928,12 +1939,14 @@ void registerRoutes() {
     sendJson("{\"saved\":true,\"restartRequired\":true}");
   });
   server.on("/api/firmware", HTTP_POST, [] {
+    if (otaPassword.isEmpty()) { sendJson("{\"error\":\"admin_password_required\"}", 403); return; }
     if (!server.authenticate("admin", otaPassword.c_str())) { server.requestAuthentication(); return; }
     const bool ok = !Update.hasError();
     sendJson(ok ? "{\"updated\":true,\"restarting\":true}" : "{\"error\":\"update_failed\"}", ok ? 200 : 500);
     if (ok) { delay(250); ESP.restart(); }
     else otaBusy = false;
   }, [] {
+    if (otaPassword.isEmpty()) return;
     if (!server.authenticate("admin", otaPassword.c_str())) return;
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
@@ -2185,20 +2198,28 @@ void connectSta() {
 
 void configureOta() {
   preferences.begin("sma-monitor", false);
-  otaPassword = preferences.getString("otaPass", "");
-  if (!ProductConfig::validOtaPassword(otaPassword.c_str())) {
-    char generated[17];
-    snprintf(generated, sizeof(generated), "%08lX%08lX",
-             static_cast<unsigned long>(esp_random()), static_cast<unsigned long>(esp_random()));
-    otaPassword = generated; preferences.putString("otaPass", otaPassword);
+  const bool passwordKeyPresent = preferences.isKey("otaPass");
+  const String storedPassword = passwordKeyPresent ? preferences.getString("otaPass", "") : String();
+  char resolved[64]{};
+  if (!ProductConfig::resolveAdminPassword(passwordKeyPresent, storedPassword.c_str(),
+                                           resolved, sizeof(resolved))) {
+    resolved[0] = '\0';
   }
+  otaPassword = resolved;
+  if (!passwordKeyPresent) preferences.putString("otaPass", "");
   preferences.end();
+  otaServiceReady = false;
+  if (otaPassword.isEmpty()) {
+    addLog("[OTA] disabled until administrator password is configured");
+    return;
+  }
   ArduinoOTA.setHostname(hostname.c_str());
   ArduinoOTA.setPassword(otaPassword.c_str());
   ArduinoOTA.onStart([] { otaBusy = true; addLog("[OTA] start"); });
   ArduinoOTA.onEnd([] { addLog("[OTA] complete; rebooting"); });
   ArduinoOTA.onError([](ota_error_t error) { otaBusy = false; addLog("[OTA] error=%u", static_cast<unsigned>(error)); });
   ArduinoOTA.begin();
+  otaServiceReady = true;
   addLog("[OTA] ready hostname=%s password_configured=true", hostname.c_str());
 }
 }  // namespace
@@ -2285,7 +2306,7 @@ void loop() {
   serviceSmaLifecycle();
   serviceScheduler();
   serviceBtScan();
-  if (scanState != ScanState::SCANNING) ArduinoOTA.handle();
+  if (otaServiceReady && scanState != ScanState::SCANNING) ArduinoOTA.handle();
   refreshInverterSnapshot();
   const bool networkAuditSuppressMqtt = networkAuditState != NetworkAuditState::IDLE &&
                                         networkAuditState != NetworkAuditState::COMPLETE &&

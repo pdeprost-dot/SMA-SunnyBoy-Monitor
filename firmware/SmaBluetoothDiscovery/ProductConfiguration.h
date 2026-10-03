@@ -38,6 +38,9 @@ bool validSerial(uint32_t value);
 bool validMac(const char* value);
 bool validWpaPassword(const char* value);
 bool validOtaPassword(const char* value);
+bool validAdminPassword(const char* value);
+bool resolveAdminPassword(bool storedKeyPresent, const char* storedValue,
+                          char* output, size_t capacity);
 bool validLatitude(double value);
 bool validLongitude(double value);
 bool formatLocalTime(time_t value, char* output, size_t capacity);

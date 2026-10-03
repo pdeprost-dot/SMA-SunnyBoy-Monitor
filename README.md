@@ -4,7 +4,7 @@ Firmware autonome pour ESP32 classique qui interroge jusqu'à trois onduleurs
 SMA Sunny Boy par Bluetooth Classic, affiche les mesures dans une interface Web
 et publie un snapshot MQTT retenu par onduleur.
 
-Version candidate actuelle : **1.0.0-rc.1**. Aucune licence globale n'est
+Version candidate actuelle : **1.0.0-rc.2**. Aucune licence globale n'est
 encore attribuée au dépôt ; la provenance du protocole est documentée dans
 [`docs/PROTOCOL_PROVENANCE.md`](docs/PROTOCOL_PROVENANCE.md).
 
