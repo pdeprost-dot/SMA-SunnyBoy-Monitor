@@ -8,11 +8,13 @@ Sans configuration valide, l'ESP32 ouvre :
 
 - SSID : `SMA-Monitor-XXXX` ;
 - mot de passe : `SMAsetup-XXXX` ;
-- page : `http://192.168.4.1/`.
+- page : adresse indiquée par Serial ou par la passerelle du réseau affichée
+  par le système d'exploitation.
 
 `XXXX` est affiché sur Serial et dérivé de l'identité de la carte. La page
 permet de scanner les SSID, choisir le réseau, saisir le mot de passe et
-redémarrer. Le mot de passe LAN n'est jamais renvoyé par l'API ni écrit dans
+redémarrer. Dans la version produit actuelle, les secrets enregistrés sont
+renvoyés uniquement à l'interface Web authentifiée et ne sont pas écrits dans
 les logs.
 
 L'effacement Wi-Fi exige un POST sur `/api/wifi/reset` avec le corps JSON
@@ -34,9 +36,11 @@ retourne HTTP 409. L'OTA n'est traitée que hors scan.
 
 ## OTA LAN
 
-Le hostname et un mot de passe OTA aléatoire persistant sont imprimés sur le
-port série au boot. Conserver ce mot de passe dans un emplacement privé ; il
-n'est pas exposé par l'API.
+Le hostname est imprimé sur Serial. Dans RC1, un secret administrateur/OTA
+aléatoire est créé en NVS si aucun secret valide n'existe, mais sa valeur n'est
+pas imprimée. Cette limite empêche le provisionnement Web autonome d'une NVS
+vierge ; voir [INSTALLATION.md](INSTALLATION.md). Une installation existante
+doit conserver son secret configuré dans un emplacement privé.
 
 Compiler avec une partition à deux slots OTA :
 

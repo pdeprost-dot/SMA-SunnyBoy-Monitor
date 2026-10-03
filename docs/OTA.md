@@ -8,7 +8,9 @@ Deux mécanismes utilisent le même secret administrateur :
 Une barre à 100 % ne suffit pas : un test OTA est PASS uniquement après
 finalisation, sélection de la partition, redémarrage et identification de la
 nouvelle version. Le schéma `min_spiffs` fournit deux partitions applicatives
-OTA ; la taille du binaire doit être vérifiée avant publication.
+OTA ; l'image applicative `.bin` doit tenir dans la limite de **1 966 080
+octets**. La procédure Arduino IDE et l'identification du bon fichier sont
+détaillées dans [INSTALLATION.md](INSTALLATION.md).
 
 Pour chaque release conserver exactement le binaire réellement testé, son
 SHA-256, le commit source, le FQBN, les versions d'outils et le résultat matériel.

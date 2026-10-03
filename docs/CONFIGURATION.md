@@ -28,3 +28,7 @@ Les champs secret sont masqués par défaut et peuvent être affichés ou modifi
 depuis l'interface authentifiée. Le secret administrateur est partagé par le
 Web, ArduinoOTA et l'OTA navigateur. Le mode maintenance suspend le scheduler
 SMA mais conserve Wi-Fi, Web, MQTT et OTA.
+
+Attention : dans RC1, une NVS vierge reçoit un secret administrateur aléatoire
+qui n'est pas affiché. Cette limite de première installation et le parcours
+complet sont décrits dans [INSTALLATION.md](INSTALLATION.md).

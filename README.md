@@ -49,11 +49,11 @@ PZEM et ProgHard Link ne font pas partie de cette release candidate.
 - transition vers la production matinale : **PASS** ;
 - récupération réelle par point d'accès de secours : **EN ATTENTE**.
 
-## Installation rapide
+## Installation avec Arduino IDE
 
-Voir [`docs/INSTALLATION.md`](docs/INSTALLATION.md) pour l'environnement exact,
-le build propre et le flash USB. Après le premier démarrage, configurer Wi-Fi,
-les trois onduleurs, MQTT, la localisation et les secrets depuis le Web.
+Voir le [guide complet Arduino IDE 2.x](docs/INSTALLATION.md) pour le premier
+flash USB, la configuration, la compilation et les mises à jour ArduinoOTA ou
+`.bin` depuis le navigateur.
 
 Documentation :
 
