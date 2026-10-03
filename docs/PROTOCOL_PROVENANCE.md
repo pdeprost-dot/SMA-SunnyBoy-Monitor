@@ -39,6 +39,12 @@ Références :
 - **O** : architecture ou expression développée dans ce projet ;
 - **U** : origine non établie avec assez de confiance.
 
+Une revue ultérieure a ajouté la catégorie **M** (« visible dans un dépôt qui
+se déclare MIT »). Cette catégorie n'est pas une validation de licence :
+ESP32_SMA-Inverter-MQTT contient dans son historique un firmware SMA initial
+sous CC BY-NC-SA, et esphome_smabluetooth descend explicitement de ce code.
+Voir [`LICENSE_PROVENANCE_REVIEW.md`](LICENSE_PROVENANCE_REVIEW.md).
+
 Un élément peut recevoir plusieurs lettres : une constante peut être un fait
 protocolaire P alors que la manière de la parcourir ou de la présenter provient
 de N ou S. Les faits et valeurs nécessaires à l'interopérabilité sont séparés
@@ -109,3 +115,10 @@ pas nécessairement l'origine. Elle ne détermine pas à elle seule si cette
 séquence est protégeable, si notre expression est dérivée, ou quelles conditions
 de redistribution s'appliquent. Ces questions restent séparées de l'analyse
 technique de provenance.
+
+La comparaison source approfondie des deux implémentations ESP32 déclarées MIT
+et le plan de réduction du risque d'expression sont documentés séparément dans
+[`LICENSE_PROVENANCE_REVIEW.md`](LICENSE_PROVENANCE_REVIEW.md). Sa conclusion
+technique est qu'une licence MIT globale est plausible pour l'architecture
+produit, mais pas encore suffisamment étayée pour le noyau protocolaire sans
+réécriture indépendante ou revue juridique.

@@ -22,9 +22,13 @@ dans le sketch.
 |---|---|---|
 | SBFspot, commit `b77f65047e9f4a136a09677838f6b4e5024862ee` | Référence de comportement et d'interopérabilité SMA | CC BY-NC-SA 3.0 dans la version étudiée |
 | NANODE SMA PV MONITOR, Stuart Pittaway | Référence historique antérieure de la lignée du protocole | CC BY-NC-SA 3.0 dans les fichiers étudiés |
+| ESP32_SMA-Inverter-MQTT, révision `342911836417b2032033e8feb82f9e65b449845c` | Comparaison ESP32 ; aucune source incorporée | MIT affichée actuellement, mais historique contenant un arbre firmware CC BY-NC-SA 3.0 avant fusion/relicenciation non expliquée |
+| esphome_smabluetooth, révision `bb0658dfe3109c1ff45fc44b88419ccc2b434561` | Comparaison ESPHome ; aucune source incorporée | MIT affichée ; module protocolaire issu de la lignée ESP32_SMA-Inverter-MQTT |
 
 Leurs sources ne sont pas vendoriées dans ce dépôt. La comparaison détaillée,
 les éléments d'expression potentiellement proches et les incertitudes sont dans
 [`PROTOCOL_PROVENANCE.md`](PROTOCOL_PROVENANCE.md). Avant de choisir une licence
 de distribution pour ce dépôt, cette provenance doit faire l'objet d'une revue
 juridique ou d'une séparation/réécriture documentée des éléments concernés.
+La revue détaillée de cette transition CC → MIT et ses limites est dans
+[`LICENSE_PROVENANCE_REVIEW.md`](LICENSE_PROVENANCE_REVIEW.md).
